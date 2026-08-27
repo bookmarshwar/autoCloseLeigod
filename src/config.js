@@ -21,6 +21,8 @@ const DEFAULTS = {
   logFile: 'watchdog.log',   // 日志文件, 空串则不写文件
   // 附加策略(全部可配置, enabled 控制开关):
   strategies: {
+    // 策略0: 主流程 —— 轮询时长状态 → 询问游戏 → 复查 → 进程检查 → 暂停时长
+    strategy0: { enabled: true },
     // 策略1: 定时关闭 —— 到达 closeTimes(HH:MM 列表)且时长在计时中 → 暂停时长
     //         (pause 后雷神会自动停止加速游戏, 不使用 stop 接口)
     strategy1: { enabled: false, closeTimes: [] },
@@ -45,6 +47,7 @@ function parseArgs(argv) {
     if (a === '--dry') flags.dryRun = true;
     else if (a === '--debug') flags.debug = true;
     else if (a === '--once') flags.once = true;
+    else if (a === '--strategy0') flags.strategy0 = true;
     else if (a === '--strategy1') flags.strategy1 = true;
     else if (a === '--strategy2') flags.strategy2 = true;
     else if (a === '--no-log') flags.logFile = false;
@@ -79,6 +82,7 @@ function loadConfig(argv = []) {
   if (flags.verbose) cfg.verbose = true;
   if (flags.dryRun) cfg.dryRun = true;
   if (flags.debug) cfg.debug = true;
+  if (flags.strategy0) cfg.strategies.strategy0.enabled = true;
   if (flags.strategy1) cfg.strategies.strategy1.enabled = true;
   if (flags.strategy2) cfg.strategies.strategy2.enabled = true;
   if (flags.logFile === false) cfg.logFile = null;

@@ -14,7 +14,8 @@
  *          进程不存在 → 关闭: pause --force(默认直接关闭, 可配二次确认)
  *          进程存在   → 重新计时, 循环监控
  *
- * 附加策略(config.json strategies, 可单独开关):
+ * 附加策略(config.json strategies, 各自 enabled 独立开关):
+ *   策略0 主流程: 轮询时长→询问游戏→复查→进程检查→暂停时长(默认开)
  *   策略1 定时关闭: 每天到达 closeTimes(HH:MM)且计时中 → 暂停时长
  *         (pause 后雷神自动停止加速, 不使用 stop 接口)
  *   策略2 键鼠检测: 「关闭」前监听键鼠活动(listenSeconds 窗口), 有活动则
@@ -105,7 +106,11 @@ async function closeGuard(reason, opts = {}) {
     log('[关闭] 暂停执行失败, 继续驻留, 下次复查会重试 (Ctrl+C 退出)');
   }
   // 不管成功失败都不退出: 常驻看门狗, 等待用户下次开启加速
-  startPolling();
+  if (cfg.strategies.strategy0.enabled) {
+    startPolling();
+  } else {
+    log('[关闭] 主流程(策略0)已关闭, 不恢复轮询; 策略1 定时检查仍生效');
+  }
 }
 
 /** 轮询一次: 查询加速状态; 加速中则询问是否有加速游戏 */
@@ -303,20 +308,37 @@ async function main() {
 
   log(`[启动] sdkExe=${exe}`);
   log(`[启动] 轮询间隔=${cfg.pollIntervalSeconds}s | 复查间隔=${cfg.checkIntervalMinutes}min | game查询等待=${cfg.gameQuerySeconds}s | dryRun=${cfg.dryRun} | debug=${cfg.debug} | once=${!!cfg.once}`);
+  const s0 = cfg.strategies.strategy0;
   const s1 = cfg.strategies.strategy1;
   const s2 = cfg.strategies.strategy2;
-  log(`[启动] 策略1 定时关闭: ${s1.enabled ? `开 (每天 ${s1.closeTimes.length ? s1.closeTimes.join(',') : '未设置时间'}; stopAcceleration=${s1.stopAcceleration})` : '关'}`);
+  log(`[启动] 策略0 主流程(轮询→守护→关闭): ${s0.enabled ? '开' : '关'}`);
+  log(`[启动] 策略1 定时关闭: ${s1.enabled ? `开 (每天 ${s1.closeTimes.length ? s1.closeTimes.join(',') : '未设置时间'})` : '关'}`);
   log(`[启动] 策略2 键鼠检测延后: ${s2.enabled ? `开 (监听 ${s2.listenSeconds}s, 有活动延后 ${s2.deferMinutes}min)` : '关'}`);
+  if (!s0.enabled && s2.enabled) {
+    log('[启动] 提示: 策略2 依附于主流程的关闭判断, 主流程关闭时策略2 不生效');
+  }
+  if (!s0.enabled && !s1.enabled) {
+    log('[启动] 没有任何策略启用, 看门狗退出 (可改 config.json 的 strategies 段)');
+    process.exit(0);
+  }
 
   if (cfg.once) {
+    if (!s0.enabled) {
+      log('[--once] 主流程(策略0)已关闭, 无可诊断内容');
+      process.exit(0);
+    }
     await pollOnce();
     log('[--once] 单轮诊断结束');
     process.exit(0);
   }
 
-  log('[启动] 开始轮询加速状态 (Ctrl+C 退出)');
-  startPolling();
-  if (cfg.strategies.strategy1.enabled && !cfg.once) {
+  if (s0.enabled) {
+    log('[启动] 开始轮询加速状态 (Ctrl+C 退出)');
+    startPolling();
+  } else {
+    log('[启动] 主流程已关闭, 仅运行策略1 定时检查');
+  }
+  if (s1.enabled) {
     scheduleTimer = setInterval(checkScheduledClose, 30 * 1000);
     checkScheduledClose();
   }
