@@ -136,12 +136,9 @@ async function closeGuard(reason, opts = {}) {
     log(`[关闭] 已执行暂停时长: ok=${ok} action=${r.action || '-'} httpStatus=${r.httpStatus || '-'}${r.effect ? ' effect=' + r.effect : ''}`);
     if (ok) {
       if (activityTimer) { clearInterval(activityTimer); activityTimer = null; }  // 策略2 独立模式: 成功后停止探测
-      if (cfg.strategies.strategy0.enabled) {
-        log('[关闭] 时长已暂停。看门狗继续驻留监听: 下次开启加速会自动重新守护 (Ctrl+C 退出)');
-        startPolling();
-      } else {
-        log('[关闭] 时长已暂停。策略0 未启用, 不会自动重新守护; 继续驻留 (策略1 定时检查仍生效; Ctrl+C 退出)');
-      }
+      // 驻留文案不提及策略编号: 策略组合/模式已在启动日志交代, 行为日志只描述事实
+      log('[关闭] 时长已暂停, 看门狗继续驻留监听 (Ctrl+C 退出)');
+      if (cfg.strategies.strategy0.enabled) startPolling();  // 仅主流程模式下恢复轮询
     } else {
       // M-1: 失败不谎称重试——独立模式保留探测定时器, 主流程恢复轮询
       log('[关闭] 暂停执行返回异常, 保持驻留, 下次复查/探测将重试 (Ctrl+C 退出)');
