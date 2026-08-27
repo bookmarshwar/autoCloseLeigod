@@ -15,7 +15,7 @@ const DEFAULTS = {
   checkIntervalMinutes: 10,  // 识别到游戏后, 复查加速状态的间隔(分钟)
   gameQuerySeconds: 8,       // 每次 game 查询最长等待(秒)
   processMaxResults: 50,     // 进程搜索最大返回数
-  notFoundConfirmSeconds: 15, // 未找到游戏进程后的二次确认等待(秒); 0 = 不确认直接关闭
+  notFoundConfirmSeconds: 0,  // 未找到游戏进程后二次确认等待(秒); 默认 0 = 不确认直接关闭, 需要时再开启
   dryRun: false,             // true 时「关闭」只预览不真正暂停
   logFile: 'watchdog.log',   // 日志文件, 空串则不写文件
 };

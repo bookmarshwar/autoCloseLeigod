@@ -3,14 +3,15 @@
  * autoCloseLeigod — 雷神加速器「没人玩游戏就自动暂停时长」看门狗
  *
  * 流程(全部时间可配置):
- *   1. 定时轮询加速状态 (time --acc, 每 pollIntervalSeconds)
- *   2. 加速中 → 询问是否有加速游戏 (game)
+ *   1. 定时轮询 (time --acc, 每 pollIntervalSeconds)
+ *      时长未在计时(state≠running) → 延后判断, 不做任何动作
+ *   2. 计时中且加速中 → 询问是否有加速游戏 (game)
  *        有游戏 → 启动复查计时器(checkIntervalMinutes, 默认 10 分钟)并关闭轮询
  *        无游戏 → 继续轮询, 等待游戏出现
- *   3. 计时到期 → 再次询问加速状态
+ *   3. 计时到期 → 先看时长状态; 仍计时中 → 再次询问加速状态
  *        没有游戏在加速 → 关闭: pause --force(暂停时长)
  *        有游戏 → 搜索进程 (ps 关键字 = exeName 优先, 否则游戏名)
- *          进程不存在 → 关闭: pause --force
+ *          进程不存在 → 关闭: pause --force(默认直接关闭, 可配二次确认)
  *          进程存在   → 重新计时, 循环监控
  */
 'use strict';
@@ -94,8 +95,13 @@ async function pollOnce() {
       return;
     }
     const acc = t.acc || {};
+    // 先判断时长是否在计时: 时长没在消耗(state≠running)就直接延后, 不做任何判断/动作
+    if (t.state !== 'running') {
+      log(`[轮询#${cycle}] 时长未在计时 (state=${t.state}), 延后判断`);
+      return;
+    }
     if (!acc.accelerating) {
-      log(`[轮询#${cycle}] 当前未在加速 (state=${t.state}), 继续轮询`);
+      log(`[轮询#${cycle}] 计时中但未检测到加速 (state=${t.state}), 延后判断`);
       return;
     }
 
@@ -136,6 +142,20 @@ async function runGuardCheck() {
   try {
     guardTimer = null;
     guardNo++;
+    // 先判断时长状态: 已暂停/未计时 → 无需暂停动作, 直接恢复轮询驻留
+    let t;
+    try {
+      t = await sdk.time();
+    } catch (e) {
+      log(`[检查#${guardNo}] time 查询失败: ${e.message}, ${cfg.checkIntervalMinutes} 分钟后重试`);
+      if (!cfg.once) guardTimer = setTimeout(runGuardCheck, checkMs);
+      return;
+    }
+    if (t.state !== 'running') {
+      log(`[检查#${guardNo}] 时长未在计时 (state=${t.state}), 无需处理, 恢复轮询驻留`);
+      startPolling();
+      return;
+    }
     let g;
     try {
       g = await sdk.game(cfg.gameQuerySeconds);

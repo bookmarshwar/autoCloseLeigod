@@ -4,7 +4,7 @@
   "checkIntervalMinutes": 10,
   "gameQuerySeconds": 8,
   "processMaxResults": 50,
-  "notFoundConfirmSeconds": 15,
+  "notFoundConfirmSeconds": 0,
   "dryRun": false,
   "logFile": "watchdog.log"
 }
