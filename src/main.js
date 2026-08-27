@@ -5,9 +5,9 @@
  * 流程(全部时间可配置):
  *   1. 定时轮询 (time --acc, 每 pollIntervalSeconds)
  *      时长未在计时(state≠running) → 延后判断, 不做任何动作
- *   2. 计时中且加速中 → 询问是否有加速游戏 (game)
+ *   2. 计时中 → 用 game 询问是否有加速游戏(不依赖 acc, acc 只作参考)
  *        有游戏 → 启动复查计时器(checkIntervalMinutes, 默认 10 分钟)并关闭轮询
- *        无游戏 → 继续轮询, 等待游戏出现
+ *        无游戏 → 同样进入复查节奏, 复查间隔后再次检测(到时仍无游戏 → 自动暂停)
  *   3. 计时到期 → 先看时长状态; 仍计时中 → 再次询问加速状态
  *        没有游戏在加速 → 关闭: pause --force(暂停时长)
  *        有游戏 → 搜索进程 (ps 关键字 = exeName 优先, 否则游戏名)
@@ -100,12 +100,9 @@ async function pollOnce() {
       log(`[轮询#${cycle}] 时长未在计时 (state=${t.state}), 延后判断`);
       return;
     }
-    if (!acc.accelerating) {
-      log(`[轮询#${cycle}] 计时中但未检测到加速 (state=${t.state}), 延后判断`);
-      return;
-    }
 
-    // 加速中 → 询问是否有加速游戏
+    // 计时中 → 用 game 接口确认是否有游戏在加速(acc 只作参考:
+    // 暂停时长不会停加速会话, WS 瞬时抖动也可能漏报加速)
     let g;
     try {
       g = await sdk.game(cfg.gameQuerySeconds);
@@ -116,10 +113,12 @@ async function pollOnce() {
 
     if (g.accelerating && g.gameId) {
       const name = g.gameName || ('game_id=' + g.gameId);
-      log(`[轮询#${cycle}] 加速中, 识别到游戏: ${name}${g.exeName ? ' / exe=' + g.exeName : ''}`);
+      log(`[轮询#${cycle}] 计时中, 识别到游戏: ${name}${g.exeName ? ' / exe=' + g.exeName : ''}${acc.accelerating ? '' : ' (acc 未报加速, 以 game 为准)'}`);
       await enterGuard();
     } else {
-      log(`[轮询#${cycle}] 加速中但未识别到游戏 (accelerating=${g.accelerating}, gameId=${g.gameId || '-'}), 继续轮询等待游戏出现`);
+      // 计时中但查不到游戏: 进入复查节奏——复查间隔后再次检测, 到时仍无游戏则自动暂停
+      log(`[轮询#${cycle}] 计时中但未识别到加速游戏 (acc=${acc.accelerating}, gameId=${g.gameId || '-'}), ${cfg.checkIntervalMinutes} 分钟后再次检测`);
+      await enterGuard();
     }
   } finally {
     pollBusy = false;
