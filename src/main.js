@@ -91,10 +91,10 @@ function suspendDetectors() {
   stopPolling();
 }
 
-/** 按启用的检测类策略恢复守护(策略0 优先于策略2 独立模式) */
+/** 按启用的检测类策略恢复守护(策略0 轮询与策略2 空闲探测可并行) */
 function resumeDetectors() {
   if (cfg.strategies.strategy0.enabled) startPolling();
-  else if (cfg.strategies.strategy2.enabled) startActivityGuard();
+  if (cfg.strategies.strategy2.enabled) startActivityGuard();
 }
 
 /** 调度低频恢复检测: 休眠 recheckDelayMinutes 后恢复(0 = 不休眠立即恢复) */
@@ -424,51 +424,49 @@ async function main() {
   const s0 = cfg.strategies.strategy0;
   const s1 = cfg.strategies.strategy1;
   const s2 = cfg.strategies.strategy2;
-  const s2Standalone = s2.enabled && !s0.enabled;  // 策略2 独立模式(主流程关闭时)
   log(`[启动] 策略0 主流程(轮询→守护→关闭): ${s0.enabled ? `开 (轮询${cfg.pollIntervalSeconds}s/复查${cfg.checkIntervalMinutes}min/查询${cfg.gameQuerySeconds}s/进程上限${cfg.processMaxResults}/二次确认${cfg.notFoundConfirmSeconds}s)` : '关'}`);
   log(`[启动] 策略1 定时关闭: ${s1.enabled ? `开 (每天 ${s1.closeTimes.length ? s1.closeTimes.join(',') : '未设置时间'})` : '关'}`);
   if (s1.enabled && (!Array.isArray(s1.closeTimes) || s1.closeTimes.length === 0)) {
     logWarn('[启动] 警告: 策略1 已启用但未设置 closeTimes, 不会触发任何定时关闭 —— 请配置如 ["23:30"]');
   }
-  // A2/C6: 启动日志按模式打印「生效+忽略」参数, 避免"写了没生效"的困惑
-  log(`[启动] 策略2 键鼠检测: ${cfg.strategies.strategy2.enabled ? (s2Standalone
-    ? `开 (独立模式: 监听${cfg.strategies.strategy2.standalone.listenSeconds}s/每${cfg.strategies.strategy2.standalone.probeIntervalSeconds}s探测/连续空闲${cfg.strategies.strategy2.standalone.idleMinutes}min自动暂停; 当前忽略: attached.deferMinutes)`
-    : `开 (依附模式: 监听${cfg.strategies.strategy2.attached.listenSeconds}s, 有活动延后${cfg.strategies.strategy2.attached.deferMinutes}min再判断; 当前忽略: standalone.idleMinutes/standalone.probeIntervalSeconds)`)
+  // 策略2 独立于策略0: 只要启用就运行空闲探测守护; 策略0 开启时其关闭路径
+  // 额外受 attached 组保护(关闭前探测, 有活动延后)
+  log(`[启动] 策略2 键鼠检测: ${s2.enabled
+    ? `开 (空闲探测: 监听${s2.standalone.listenSeconds}s/每${s2.standalone.probeIntervalSeconds}s探测/连续空闲${s2.standalone.idleMinutes}min自动暂停${s0.enabled ? `; 策略0 关闭前受 attached 组保护(监听${s2.attached.listenSeconds}s/有活动延后${s2.attached.deferMinutes}min)` : ''})`
     : '关'}`);
-  if (s2Standalone) {
-    log('[启动] 策略2 以独立模式运行: 主流程未启用, 直接按键鼠空闲探测守护时长');
-  }
-  if (!s0.enabled && !s1.enabled && !s2Standalone) {
+  if (!s0.enabled && !s1.enabled && !s2.enabled) {
     log('[启动] 没有任何策略启用, 看门狗退出 (可改 config.json 的 strategies 段)');
     process.exit(0);
   }
 
   if (cfg.once) {
-    if (!s0.enabled) {
-      if (s2Standalone) {
-        // B6: 独立模式下 --once 支持"探测一次+报告"
-        const st = cfg.strategies.strategy2.standalone;
-        log('[--once] 独立模式诊断: 探测一次键鼠状态');
-        const r = await activity.detectActivity(st.listenSeconds);
-        log(`[--once] 空闲采样: ${r.samples.map((v) => (v === null ? '失败' : v + 'ms')).join(' / ')} → ${r.active ? '有键鼠活动' : '无键鼠活动'}`);
-        log(`[--once] 独立模式将按此节奏运行: 每 ${st.probeIntervalSeconds}s 探测, 连续空闲 ${st.idleMinutes}min 自动暂停`);
-        process.exit(0);
-      }
-      log('[--once] 主流程(策略0)已关闭, 无可诊断内容');
+    if (s0.enabled) {
+      await pollOnce();
+      log('[--once] 单轮诊断结束');
       process.exit(0);
     }
-    await pollOnce();
-    log('[--once] 单轮诊断结束');
+    if (s2.enabled) {
+      // B6: 策略2 支持"探测一次+报告"
+      const st = cfg.strategies.strategy2.standalone;
+      log('[--once] 策略2 诊断: 探测一次键鼠状态');
+      const r = await activity.detectActivity(st.listenSeconds);
+      log(`[--once] 空闲采样: ${r.samples.map((v) => (v === null ? '失败' : v + 'ms')).join(' / ')} → ${r.active ? '有键鼠活动' : '无键鼠活动'}`);
+      log(`[--once] 策略2 将按此节奏运行: 每 ${st.probeIntervalSeconds}s 探测, 连续空闲 ${st.idleMinutes}min 自动暂停`);
+      process.exit(0);
+    }
+    log('[--once] 主流程(策略0)已关闭, 无可诊断内容');
     process.exit(0);
   }
 
   if (s0.enabled) {
     log('[启动] 开始轮询加速状态 (Ctrl+C 退出)');
     startPolling();
-  } else if (s2Standalone) {
+  }
+  if (s2.enabled) {
     startActivityGuard();
-  } else {
-    log('[启动] 主流程已关闭, 仅运行策略1 定时检查');
+  }
+  if (!s0.enabled && !s2.enabled) {
+    log('[启动] 检测类策略均未启用, 仅运行策略1 定时检查');
   }
   if (s1.enabled) {
     scheduleTimer = setInterval(checkScheduledClose, 30 * 1000);
