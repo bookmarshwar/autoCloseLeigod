@@ -1,0 +1,16 @@
+{
+  "name": "auto-close-leigod",
+  "version": "0.1.0",
+  "private": true,
+  "description": "雷神加速器看门狗: 定时轮询加速状态 → 识别加速游戏并计时复查 → 无游戏/无进程时自动暂停时长(pause), 时间全部可配置",
+  "main": "src/main.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/main.js",
+    "check": "node src/main.js --once",
+    "test": "node test/smoke.js"
+  },
+  "license": "MIT"
+}
