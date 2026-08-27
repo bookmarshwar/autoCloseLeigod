@@ -161,6 +161,24 @@ function loadConfig(argv = []) {
   if (cfg.strategies.strategy2.listenSeconds < 1) cfg.strategies.strategy2.listenSeconds = 1;
   if (cfg.strategies.strategy2.deferMinutes < 1) cfg.strategies.strategy2.deferMinutes = 1;
   if (cfg.strategies.strategy2.idleMinutes < 0.05) cfg.strategies.strategy2.idleMinutes = 0.05;
+
+  // 策略1 closeTimes 规范化: "H:MM" → "HH:MM"(匹配用补零格式), 非法项忽略并警告
+  if (Array.isArray(cfg.strategies.strategy1.closeTimes)) {
+    const normalized = [];
+    for (const t of cfg.strategies.strategy1.closeTimes) {
+      const m = /^(\d{1,2}):(\d{2})$/.exec(String(t).trim());
+      if (m) {
+        const h = Number(m[1]);
+        const min = Number(m[2]);
+        if (h >= 0 && h <= 23 && min >= 0 && min <= 59) {
+          normalized.push(`${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`);
+          continue;
+        }
+      }
+      console.warn(`[配置] 策略1 closeTimes 含无效时间 "${t}", 已忽略 (格式应为 HH:MM, 如 "23:30")`);
+    }
+    cfg.strategies.strategy1.closeTimes = normalized;
+  }
   return cfg;
 }
 
