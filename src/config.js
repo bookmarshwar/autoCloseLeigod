@@ -68,7 +68,6 @@ function parseArgs(argv) {
     else if (a === '--strategy1') flags.strategy1 = true;
     else if (a === '--strategy2') flags.strategy2 = true;
     else if (a === '--no-log') flags.logFile = false;
-    else if (a === '--verbose') flags.verbose = true;
   }
   return flags;
 }
@@ -124,7 +123,6 @@ function loadConfig(argv = []) {
 
   const flags = parseArgs(argv);
   if (flags.once) cfg.once = true;
-  if (flags.verbose) cfg.verbose = true;
   if (flags.dryRun) cfg.dryRun = true;
   if (flags.debug) cfg.debug = true;
   if (flags.strategy0) cfg.strategies.strategy0.enabled = true;
@@ -169,6 +167,7 @@ function loadConfig(argv = []) {
   if (cfg.notFoundConfirmSeconds < 0) { cfg.notFoundConfirmSeconds = 0; cfg.strategies.strategy0.notFoundConfirmSeconds = 0; }
   if (cfg.strategies.strategy2.listenSeconds < 1) cfg.strategies.strategy2.listenSeconds = 1;
   if (cfg.strategies.strategy2.deferMinutes < 1) cfg.strategies.strategy2.deferMinutes = 1;
+  // 独立模式空闲阈值下限: 0.05 分钟≈3 秒, 仅用于小阈值快速实测, 正常使用建议整分钟
   if (cfg.strategies.strategy2.idleMinutes < 0.05) cfg.strategies.strategy2.idleMinutes = 0.05;
   if (cfg.strategies.strategy2.probeIntervalSeconds < 1) cfg.strategies.strategy2.probeIntervalSeconds = 1;
 

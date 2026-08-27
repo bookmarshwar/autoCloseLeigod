@@ -382,7 +382,7 @@ async function main() {
   const exe = cfg.sdkExe;
   if (!fs.existsSync(exe)) {
     console.error(`[启动] SDK exe 不存在: ${exe}`);
-    console.error('       请在 config.json 配置正确的 sdkExe (默认 ..\\leigod-sdk\\build\\leigod-sdk.exe)');
+    console.error('       请在 config.json 配置正确的 sdkExe (默认 sdk\\leigod-sdk.exe)');
     process.exit(1);
   }
 
@@ -396,7 +396,11 @@ async function main() {
   if (s1.enabled && (!Array.isArray(s1.closeTimes) || s1.closeTimes.length === 0)) {
     logWarn('[启动] 警告: 策略1 已启用但未设置 closeTimes, 不会触发任何定时关闭 —— 请配置如 ["23:30"]');
   }
-  log(`[启动] 策略2 键鼠检测: ${s2.enabled ? (s2Standalone ? `开 (独立模式: 空闲${s2.idleMinutes}min 自动暂停)` : `开 (监听 ${s2.listenSeconds}s, 有活动延后 ${s2.deferMinutes}min)`) : '关'}`);
+  // A2/C6: 启动日志按模式打印「生效+忽略」参数, 避免"写了没生效"的困惑
+  log(`[启动] 策略2 键鼠检测: ${s2.enabled ? (s2Standalone
+    ? `开 (独立模式: 监听${s2.listenSeconds}s/每${s2.probeIntervalSeconds}s探测/连续空闲${s2.idleMinutes}min自动暂停; 当前忽略: deferMinutes)`
+    : `开 (依附模式: 监听${s2.listenSeconds}s, 有活动延后${s2.deferMinutes}min再判断; 当前忽略: idleMinutes/probeIntervalSeconds)`)
+    : '关'}`);
   if (s2Standalone) {
     log('[启动] 策略2 以独立模式运行: 主流程未启用, 直接按键鼠空闲探测守护时长');
   }
@@ -407,6 +411,14 @@ async function main() {
 
   if (cfg.once) {
     if (!s0.enabled) {
+      if (s2Standalone) {
+        // B6: 独立模式下 --once 支持"探测一次+报告"
+        log('[--once] 独立模式诊断: 探测一次键鼠状态');
+        const r = await activity.detectActivity(s2.listenSeconds);
+        log(`[--once] 空闲采样: ${r.samples.map((v) => (v === null ? '失败' : v + 'ms')).join(' / ')} → ${r.active ? '有键鼠活动' : '无键鼠活动'}`);
+        log(`[--once] 独立模式将按此节奏运行: 每 ${s2.probeIntervalSeconds}s 探测, 连续空闲 ${s2.idleMinutes}min 自动暂停`);
+        process.exit(0);
+      }
       log('[--once] 主流程(策略0)已关闭, 无可诊断内容');
       process.exit(0);
     }
