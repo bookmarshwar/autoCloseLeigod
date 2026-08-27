@@ -40,6 +40,33 @@
 > SDK 云端回放, 不修改雷神任何数据文件)。暂停后看门狗**继续驻留监听**(不退出),
 > 下次开启加速会自动重新守护; 按 `Ctrl+C` 结束。本工具自身除 `watchdog.log` 外不写任何文件。
 
+## 策略(config.json 的 `strategies` 段, 全部可配置, 可单独开关)
+
+### 策略1: 定时关闭(定时暂停时长, 可选一并停止加速)
+
+```json
+"strategy1": { "enabled": true, "closeTimes": ["23:30", "01:00"], "stopAcceleration": true }
+```
+
+- 每天到达 `closeTimes`(HH:MM 列表)且**时长仍在计时** → 自动暂停时长;
+  `stopAcceleration: true` 且正在加速时, 一并调用 `stop --force` 停止加速。
+- 适合睡前/固定时间兜底, 防止挂机烧时长。
+- 用 `--strategy1` 参数可临时开启(时间仍需在配置里给出)。
+
+### 策略2: 键鼠活动检测(关闭前延后判断)
+
+```json
+"strategy2": { "enabled": true, "listenSeconds": 3, "deferMinutes": 10 }
+```
+
+- 看门狗即将执行「关闭」时, 用系统最后输入时间探测键鼠活动(监听窗口
+  `listenSeconds` 秒, 窗口起点/终点各采样一次);
+- **检测到键鼠活动 → 延后 `deferMinutes` 分钟再判断**(人还在电脑前, 可能是
+  正在启动游戏/临时忙, 不急着暂停);
+- 全程无活动才执行关闭。探测失败按「无活动」处理(不阻塞关闭)。
+- 实现用 Win32 `GetLastInputInfo`, 纯查询无钩子、与雷神无关。
+- 用 `--strategy2` 参数可临时开启。
+
 ## 使用
 
 前提: `sdk/leigod-sdk.exe` 已随仓库提供, 首次使用会自动绑定雷神加速器位置
@@ -64,6 +91,7 @@ npm test                     # 冒烟测试(只读)
 | `dryRun` | false | true 时「关闭」只预览、不真正暂停时长 |
 | `debug` | false | true 时打印每次 SDK 调用参数与返回的完整 JSON(排查用) |
 | `logFile` | `watchdog.log` | 日志文件(空串则只输出控制台) |
+| `strategies` | 见上方「策略」 | 策略1 定时关闭 / 策略2 键鼠检测延后, 可单独开关 |
 
 没有 config.json 时使用默认值; 可 `copy config.example.json config.json`。
 
@@ -75,6 +103,8 @@ npm test                     # 冒烟测试(只读)
 --max-ps <数量>      进程搜索上限        --dry                dry-run, 不真正暂停
 --once               只跑一轮判断退出    --no-log             不写日志文件
 --debug              打印所有 SDK 调用与返回 JSON
+--strategy1          临时开启策略1(定时关闭, 时间取自 config.json)
+--strategy2          临时开启策略2(键鼠活动检测延后)
 ```
 
 ## 已知局限

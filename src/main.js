@@ -13,6 +13,11 @@
  *        有游戏 → 搜索进程 (ps 关键字 = exeName 优先, 否则游戏名)
  *          进程不存在 → 关闭: pause --force(默认直接关闭, 可配二次确认)
  *          进程存在   → 重新计时, 循环监控
+ *
+ * 附加策略(config.json strategies, 可单独开关):
+ *   策略1 定时关闭: 每天到达 closeTimes(HH:MM)且计时中 → 暂停时长(可一并停止加速)
+ *   策略2 键鼠检测: 「关闭」前监听键鼠活动(listenSeconds 窗口), 有活动则
+ *         延后 deferMinutes 再判断(GetLastInputInfo, 纯查询无钩子)
  */
 'use strict';
 
@@ -20,6 +25,7 @@ const path = require('path');
 const fs = require('fs');
 const { loadConfig } = require('./config');
 const Leigod = require('./sdk');
+const activity = require('./activity');
 
 const cfg = loadConfig(process.argv.slice(2));
 const sdk = new Leigod({ exe: cfg.sdkExe, debug: cfg.debug, log });
@@ -31,6 +37,8 @@ let pollTimer = null;   // 轮询定时器
 let guardTimer = null;  // 复查计时器
 let pollBusy = false;   // 轮询执行中标记(防止 interval 重叠)
 let guardBusy = false;  // 复查执行中标记(防止计时器并发)
+let scheduleTimer = null;              // 策略1: 定时检查定时器
+const lastScheduledFired = new Map();  // 策略1: closeTime -> 当天日期(防同一天重复触发)
 const checkMs = cfg.checkIntervalMinutes * 60 * 1000;
 
 /* ---------------- 日志 ---------------- */
@@ -60,8 +68,25 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /* ---------------- 核心动作 ---------------- */
 
 /** 关闭: 暂停时长(等效界面「暂停时长」按钮, SDK 云端回放, 不动雷神任何文件) */
-async function closeGuard(reason) {
+async function closeGuard(reason, opts = {}) {
   log(`[关闭] 触发: ${reason}`);
+  // 策略2: 执行关闭前检测键鼠活动, 有活动则延后判断
+  const s2 = cfg.strategies.strategy2;
+  if (opts.defer && s2.enabled) {
+    log(`[策略2] 关闭前检测键鼠活动 (监听窗口 ${s2.listenSeconds}s, 全无键鼠才关闭)`);
+    const r = await activity.detectActivity(s2.listenSeconds);
+    log(`[策略2] 空闲采样: ${r.samples.map((v) => (v === null ? '失败' : v + 'ms')).join(' / ')}`);
+    if (r.active) {
+      log(`[策略2] 检测到键鼠活动 → 延后 ${s2.deferMinutes} 分钟再判断`);
+      if (cfg.once) {
+        log('[策略2] --once 诊断模式: 仅报告, 不执行任何操作');
+        process.exit(0);
+      }
+      guardTimer = setTimeout(runGuardCheck, s2.deferMinutes * 60 * 1000);
+      return;
+    }
+    log('[策略2] 无键鼠活动, 继续关闭流程');
+  }
   if (cfg.once) {
     log('[关闭] --once 诊断模式: 仅报告, 不执行任何操作');
     process.exit(0);
@@ -174,7 +199,7 @@ async function runGuardCheck() {
     if (!(g.accelerating && g.gameId)) {
       // 没有游戏在加速 → 关闭
       log(`[检查#${guardNo}] 加速状态: 没有游戏在加速 (accelerating=${g.accelerating}, gameId=${g.gameId || '-'})`);
-      await closeGuard('复查时没有游戏在加速');
+      await closeGuard('复查时没有游戏在加速', { defer: true });
       return;
     }
 
@@ -211,7 +236,7 @@ async function runGuardCheck() {
           log(`[检查#${guardNo}] 二次确认进程搜索失败: ${e.message}, 按未找到处理`);
         }
       }
-      await closeGuard(`搜索进程「${keyword}」无结果${cfg.notFoundConfirmSeconds > 0 ? '(已二次确认)' : ''}`);
+      await closeGuard(`搜索进程「${keyword}」无结果${cfg.notFoundConfirmSeconds > 0 ? '(已二次确认)' : ''}`, { defer: true });
       return;
     }
 
@@ -237,6 +262,42 @@ function startPolling() {
   pollOnce();
 }
 
+/* ---------------- 策略1: 定时关闭 ---------------- */
+
+/** 到达配置的 closeTimes(HH:MM)且时长在计时中 → 暂停时长(可选一并停止加速) */
+function checkScheduledClose() {
+  const s1 = cfg.strategies.strategy1;
+  if (!s1.enabled || guardBusy) return;
+  const times = Array.isArray(s1.closeTimes) ? s1.closeTimes : [];
+  if (times.length === 0) return;
+  const now = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  const hhmm = `${p(now.getHours())}:${p(now.getMinutes())}`;
+  if (!times.includes(hhmm)) return;
+  const dayKey = now.toDateString();
+  if (lastScheduledFired.get(hhmm) === dayKey) return;  // 当天已触发过
+  lastScheduledFired.set(hhmm, dayKey);
+  log(`[策略1] 到达定时关闭时间 ${hhmm}, 检查时长状态`);
+  sdk.time().then((t) => {
+    if (t.state !== 'running') {
+      log(`[策略1] 当前未在计时 (state=${t.state}), 无需关闭`);
+      return;
+    }
+    log(`[策略1] 时长仍在计时, 执行定时关闭`);
+    if (s1.stopAcceleration) {
+      sdk.stop().then((r) => {
+        log(`[策略1] 已请求停止加速: ${JSON.stringify(r)}`);
+        return closeGuard(`定时关闭 ${hhmm}`);
+      }).catch((e) => {
+        log(`[策略1] 停止加速失败: ${e.message} (仍暂停时长)`);
+        return closeGuard(`定时关闭 ${hhmm}`);
+      });
+      return;
+    }
+    closeGuard(`定时关闭 ${hhmm}`);
+  }).catch((e) => log(`[策略1] time 查询失败: ${e.message}`));
+}
+
 /* ---------------- 启动 ---------------- */
 
 async function main() {
@@ -249,6 +310,10 @@ async function main() {
 
   log(`[启动] sdkExe=${exe}`);
   log(`[启动] 轮询间隔=${cfg.pollIntervalSeconds}s | 复查间隔=${cfg.checkIntervalMinutes}min | game查询等待=${cfg.gameQuerySeconds}s | dryRun=${cfg.dryRun} | debug=${cfg.debug} | once=${!!cfg.once}`);
+  const s1 = cfg.strategies.strategy1;
+  const s2 = cfg.strategies.strategy2;
+  log(`[启动] 策略1 定时关闭: ${s1.enabled ? `开 (每天 ${s1.closeTimes.length ? s1.closeTimes.join(',') : '未设置时间'}; stopAcceleration=${s1.stopAcceleration})` : '关'}`);
+  log(`[启动] 策略2 键鼠检测延后: ${s2.enabled ? `开 (监听 ${s2.listenSeconds}s, 有活动延后 ${s2.deferMinutes}min)` : '关'}`);
 
   if (cfg.once) {
     await pollOnce();
@@ -258,6 +323,10 @@ async function main() {
 
   log('[启动] 开始轮询加速状态 (Ctrl+C 退出)');
   startPolling();
+  if (cfg.strategies.strategy1.enabled && !cfg.once) {
+    scheduleTimer = setInterval(checkScheduledClose, 30 * 1000);
+    checkScheduledClose();
+  }
 }
 
 process.on('SIGINT', () => {

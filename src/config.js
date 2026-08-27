@@ -19,6 +19,15 @@ const DEFAULTS = {
   dryRun: false,             // true 时「关闭」只预览不真正暂停
   debug: false,              // true 时打印每次 SDK 调用参数与返回的完整 JSON
   logFile: 'watchdog.log',   // 日志文件, 空串则不写文件
+  // 附加策略(全部可配置, enabled 控制开关):
+  strategies: {
+    // 策略1: 定时关闭 —— 到达 closeTimes(HH:MM 列表)且时长在计时中 → 暂停时长;
+    //         stopAcceleration=true 且正在加速时一并停止加速
+    strategy1: { enabled: false, closeTimes: [], stopAcceleration: true },
+    // 策略2: 键鼠活动检测 —— 执行「关闭」前用 GetLastInputInfo 监听键鼠
+    //         (窗口 listenSeconds 秒); 检测到活动 → 延后 deferMinutes 分钟再判断
+    strategy2: { enabled: false, listenSeconds: 3, deferMinutes: 10 },
+  },
 };
 
 function parseArgs(argv) {
@@ -36,6 +45,8 @@ function parseArgs(argv) {
     if (a === '--dry') flags.dryRun = true;
     else if (a === '--debug') flags.debug = true;
     else if (a === '--once') flags.once = true;
+    else if (a === '--strategy1') flags.strategy1 = true;
+    else if (a === '--strategy2') flags.strategy2 = true;
     else if (a === '--no-log') flags.logFile = false;
     else if (a === '--verbose') flags.verbose = true;
   }
@@ -44,9 +55,14 @@ function parseArgs(argv) {
 
 function loadConfig(argv = []) {
   const cfg = { ...DEFAULTS };
+  // 策略对象重建副本, 避免共享 DEFAULTS 引用被变异
+  cfg.strategies = {
+    strategy1: { ...DEFAULTS.strategies.strategy1 },
+    strategy2: { ...DEFAULTS.strategies.strategy2 },
+  };
   const file = path.join(ROOT, 'config.json');
+  let local = {};
   if (fs.existsSync(file)) {
-    let local = {};
     try { local = JSON.parse(fs.readFileSync(file, 'utf8')); }
     catch (e) {
       console.error(`[配置] config.json 解析失败: ${e.message}`);
@@ -63,6 +79,8 @@ function loadConfig(argv = []) {
   if (flags.verbose) cfg.verbose = true;
   if (flags.dryRun) cfg.dryRun = true;
   if (flags.debug) cfg.debug = true;
+  if (flags.strategy1) cfg.strategies.strategy1.enabled = true;
+  if (flags.strategy2) cfg.strategies.strategy2.enabled = true;
   if (flags.logFile === false) cfg.logFile = null;
   if (flags.sdkExe) cfg.sdkExe = path.resolve(ROOT, flags.sdkExe);
   for (const k of ['pollIntervalSeconds', 'checkIntervalMinutes', 'gameQuerySeconds', 'processMaxResults', 'notFoundConfirmSeconds']) {
@@ -76,11 +94,23 @@ function loadConfig(argv = []) {
     }
   }
 
+  // strategies 深度合并: 允许只写部分字段(在 DEFAULTS 拷贝之后覆盖)
+  if (local.strategies && typeof local.strategies === 'object') {
+    for (const key of Object.keys(DEFAULTS.strategies)) {
+      const src = local.strategies[key];
+      if (src && typeof src === 'object') {
+        cfg.strategies[key] = { ...DEFAULTS.strategies[key], ...src };
+      }
+    }
+  }
+
   // 兜底下限, 防止误配置造成高频/无效调用
   if (cfg.pollIntervalSeconds < 5) cfg.pollIntervalSeconds = 5;
   if (cfg.checkIntervalMinutes < 1) cfg.checkIntervalMinutes = 1;
   if (cfg.gameQuerySeconds < 3) cfg.gameQuerySeconds = 3;
   if (cfg.notFoundConfirmSeconds < 0) cfg.notFoundConfirmSeconds = 0;
+  if (cfg.strategies.strategy2.listenSeconds < 1) cfg.strategies.strategy2.listenSeconds = 1;
+  if (cfg.strategies.strategy2.deferMinutes < 1) cfg.strategies.strategy2.deferMinutes = 1;
   return cfg;
 }
 
