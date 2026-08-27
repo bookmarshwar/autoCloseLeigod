@@ -26,6 +26,7 @@ const sdk = new Leigod({ exe: cfg.sdkExe, debug: cfg.debug, log });
 
 let cycle = 0;          // 轮询计数
 let guardNo = 0;        // 复查计数
+let firstPoll = true;   // 首轮轮询兼作启动健康检查(未绑定快速报错)
 let pollTimer = null;   // 轮询定时器
 let guardTimer = null;  // 复查计时器
 let pollBusy = false;   // 轮询执行中标记(防止 interval 重叠)
@@ -90,7 +91,12 @@ async function pollOnce() {
     let t;
     try {
       t = await sdk.time();
+      if (firstPoll) log(`[启动] 初始状态: state=${t.state} accelerating=${t.acc ? t.acc.accelerating : '-'}`);
     } catch (e) {
+      if (firstPoll && /未绑定|bind/i.test(e.message)) {
+        console.error('[启动] SDK 未绑定雷神加速器, 请先执行: leigod-sdk.exe bind --auto');
+        process.exit(1);
+      }
       log(`[轮询#${cycle}] time 查询失败: ${e.message} (继续轮询)`);
       return;
     }
@@ -122,6 +128,7 @@ async function pollOnce() {
     }
   } finally {
     pollBusy = false;
+    firstPoll = false;
   }
 }
 
@@ -242,18 +249,6 @@ async function main() {
 
   log(`[启动] sdkExe=${exe}`);
   log(`[启动] 轮询间隔=${cfg.pollIntervalSeconds}s | 复查间隔=${cfg.checkIntervalMinutes}min | game查询等待=${cfg.gameQuerySeconds}s | dryRun=${cfg.dryRun} | debug=${cfg.debug} | once=${!!cfg.once}`);
-
-  // 启动健康检查(只读): 未绑定立刻提示
-  try {
-    const t = await sdk.time();
-    log(`[启动] 初始状态: state=${t.state} accelerating=${t.acc ? t.acc.accelerating : '-'}`);
-  } catch (e) {
-    if (/未绑定|bind/i.test(e.message)) {
-      console.error('[启动] SDK 未绑定雷神加速器, 请先执行: leigod-sdk.exe bind --auto');
-      process.exit(1);
-    }
-    log(`[启动] 初始 time 查询异常: ${e.message} (继续运行)`);
-  }
 
   if (cfg.once) {
     await pollOnce();
