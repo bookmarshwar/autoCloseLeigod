@@ -84,27 +84,39 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /* ---------------- 核心动作 ---------------- */
 
-/** 关闭(暂停)成功后进入休眠: 停止轮询/探测, recheckDelayMinutes 后恢复检测 */
-function enterRecheckSleep() {
+/** 停止检测类机制(策略0 轮询/策略2 键鼠探测), 进入低频休眠 */
+function suspendDetectors() {
   if (recheckTimer) { clearTimeout(recheckTimer); recheckTimer = null; }
   if (activityTimer) { clearInterval(activityTimer); activityTimer = null; }
   stopPolling();
-  const delay = cfg.recheckDelayMinutes * 60 * 1000;
+}
+
+/** 按启用的检测类策略恢复守护(策略0 优先于策略2 独立模式) */
+function resumeDetectors() {
+  if (cfg.strategies.strategy0.enabled) startPolling();
+  else if (cfg.strategies.strategy2.enabled) startActivityGuard();
+}
+
+/** 调度低频恢复检测: 休眠 recheckDelayMinutes 后恢复(0 = 不休眠立即恢复) */
+function scheduleRecheck() {
   if (cfg.recheckDelayMinutes <= 0) {
-    // 0 = 不休眠: 立即恢复检测(保持旧行为)
-    log('[关闭] 时长已暂停, 看门狗继续驻留监听 (Ctrl+C 退出)');
-    if (cfg.strategies.strategy0.enabled) startPolling();
-    else if (cfg.strategies.strategy2.enabled) startActivityGuard();
+    logDebug('[休眠] recheckDelayMinutes=0, 不休眠, 立即恢复检测');
+    resumeDetectors();
     return;
   }
-  log(`[关闭] 时长已暂停, 看门狗继续驻留监听 (Ctrl+C 退出)`);
-  log(`[休眠] 雷神已暂停, ${cfg.recheckDelayMinutes} 分钟后重新检测 (定时关闭不受影响)`);
+  log(`[休眠] ${cfg.recheckDelayMinutes} 分钟后重新检测雷神状态 (定时关闭不受影响)`);
   recheckTimer = setTimeout(() => {
     recheckTimer = null;
     log('[休眠] 到期, 恢复检测');
-    if (cfg.strategies.strategy0.enabled) startPolling();
-    else if (cfg.strategies.strategy2.enabled) startActivityGuard();
-  }, delay);
+    resumeDetectors();
+  }, cfg.recheckDelayMinutes * 60 * 1000);
+}
+
+/** 关闭(暂停)成功后进入休眠: 停止轮询/探测, recheckDelayMinutes 后恢复检测 */
+function enterRecheckSleep() {
+  suspendDetectors();
+  log('[关闭] 时长已暂停, 看门狗继续驻留监听 (Ctrl+C 退出)');
+  scheduleRecheck();
 }
 /** 关闭: 暂停时长(等效界面「暂停时长」按钮, SDK 云端回放, 不动雷神任何文件) */
 async function closeGuard(reason, opts = {}) {
@@ -347,6 +359,11 @@ function checkScheduledClose() {
   sdk.time().then((t) => {
     if (t.state !== 'running') {
       log(`[策略1] 当前未在计时 (state=${t.state}), 无需关闭`);
+      // 定时点已到: 其他检测类策略(策略0 轮询/策略2 键鼠探测)一并降频,
+      // 进入低频休眠检测, 避免雷神已停还保持高频探测的开销
+      log('[策略1] 定时点已到, 其他策略检测一并降频 (进入休眠, 到期恢复检测)');
+      suspendDetectors();
+      scheduleRecheck();
       return;
     }
     log(`[策略1] 时长仍在计时, 执行定时关闭`);
