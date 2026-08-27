@@ -17,6 +17,7 @@ const DEFAULTS = {
   processMaxResults: 50,     // 进程搜索最大返回数
   notFoundConfirmSeconds: 0,  // 未找到游戏进程后二次确认等待(秒); 默认 0 = 不确认直接关闭, 需要时再开启
   dryRun: false,             // true 时「关闭」只预览不真正暂停
+  debug: false,              // true 时打印每次 SDK 调用参数与返回的完整 JSON
   logFile: 'watchdog.log',   // 日志文件, 空串则不写文件
 };
 
@@ -33,6 +34,7 @@ function parseArgs(argv) {
     const a = argv[i];
     if (takesValue[a] && argv[i + 1] != null) { flags[takesValue[a]] = argv[++i]; continue; }
     if (a === '--dry') flags.dryRun = true;
+    else if (a === '--debug') flags.debug = true;
     else if (a === '--once') flags.once = true;
     else if (a === '--no-log') flags.logFile = false;
     else if (a === '--verbose') flags.verbose = true;
@@ -60,6 +62,7 @@ function loadConfig(argv = []) {
   if (flags.once) cfg.once = true;
   if (flags.verbose) cfg.verbose = true;
   if (flags.dryRun) cfg.dryRun = true;
+  if (flags.debug) cfg.debug = true;
   if (flags.logFile === false) cfg.logFile = null;
   if (flags.sdkExe) cfg.sdkExe = path.resolve(ROOT, flags.sdkExe);
   for (const k of ['pollIntervalSeconds', 'checkIntervalMinutes', 'gameQuerySeconds', 'processMaxResults', 'notFoundConfirmSeconds']) {

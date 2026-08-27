@@ -22,7 +22,7 @@ const { loadConfig } = require('./config');
 const Leigod = require('./sdk');
 
 const cfg = loadConfig(process.argv.slice(2));
-const sdk = new Leigod({ exe: cfg.sdkExe });
+const sdk = new Leigod({ exe: cfg.sdkExe, debug: cfg.debug, log });
 
 let cycle = 0;          // 轮询计数
 let guardNo = 0;        // 复查计数
@@ -241,7 +241,7 @@ async function main() {
   }
 
   log(`[启动] sdkExe=${exe}`);
-  log(`[启动] 轮询间隔=${cfg.pollIntervalSeconds}s | 复查间隔=${cfg.checkIntervalMinutes}min | game查询等待=${cfg.gameQuerySeconds}s | dryRun=${cfg.dryRun} | once=${!!cfg.once}`);
+  log(`[启动] 轮询间隔=${cfg.pollIntervalSeconds}s | 复查间隔=${cfg.checkIntervalMinutes}min | game查询等待=${cfg.gameQuerySeconds}s | dryRun=${cfg.dryRun} | debug=${cfg.debug} | once=${!!cfg.once}`);
 
   // 启动健康检查(只读): 未绑定立刻提示
   try {

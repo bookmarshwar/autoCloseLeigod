@@ -6,5 +6,6 @@
   "processMaxResults": 50,
   "notFoundConfirmSeconds": 0,
   "dryRun": false,
+  "debug": false,
   "logFile": "watchdog.log"
 }

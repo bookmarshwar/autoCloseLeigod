@@ -56,6 +56,7 @@ npm test                     # 冒烟测试(只读)
 | `processMaxResults` | 50 | 进程搜索最大返回数 |
 | `notFoundConfirmSeconds` | 0 | 未找到游戏进程后二次确认等待(秒); 默认关闭, 担心 ps 瞬时误判时再开启 |
 | `dryRun` | false | true 时「关闭」只预览、不真正暂停时长 |
+| `debug` | false | true 时打印每次 SDK 调用参数与返回的完整 JSON(排查用) |
 | `logFile` | `watchdog.log` | 日志文件(空串则只输出控制台) |
 
 没有 config.json 时使用默认值; 可 `copy config.example.json config.json`。
@@ -67,6 +68,7 @@ npm test                     # 冒烟测试(只读)
 --game-seconds <秒>  game 查询等待      --sdk <路径>          SDK exe 路径
 --max-ps <数量>      进程搜索上限        --dry                dry-run, 不真正暂停
 --once               只跑一轮判断退出    --no-log             不写日志文件
+--debug              打印所有 SDK 调用与返回 JSON
 ```
 
 ## 已知局限

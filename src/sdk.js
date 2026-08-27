@@ -36,20 +36,24 @@ function extractFirstJson(text) {
 }
 
 class Leigod {
-  constructor({ exe, timeoutMs = 90000 } = {}) {
+  constructor({ exe, timeoutMs = 90000, debug = false, log } = {}) {
     if (!exe) throw new Error('缺少 sdkExe 路径');
     this.exe = exe;
     this.timeoutMs = timeoutMs;
+    this.debug = debug;
+    this.log = log || ((m) => console.log(m));
   }
 
   run(args, timeoutMs) {
     const t = timeoutMs || this.timeoutMs;
+    if (this.debug) this.log(`[DEBUG] 调用: ${this.exe.split(/[\\/]/).pop()} ${args.join(' ')}`);
     return new Promise((resolve, reject) => {
       const child = spawn(this.exe, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
       let out = '';
       let err = '';
       const timer = setTimeout(() => {
         child.kill();
+        if (this.debug) this.log(`[DEBUG] 超时(${t}ms): ${args.join(' ')}`);
         reject(new Error(`命令超时(${t}ms): ${args.join(' ')}`));
       }, t);
       child.stdout.on('data', (d) => { out += d; });
@@ -58,6 +62,13 @@ class Leigod {
       child.on('close', (code) => {
         clearTimeout(timer);
         const obj = extractFirstJson(out);
+        if (this.debug) {
+          if (code === 0 && obj) {
+            this.log(`[DEBUG] 返回: ${args.join(' ')}\n${JSON.stringify(obj)}`);
+          } else {
+            this.log(`[DEBUG] 失败(退出码 ${code}): ${args.join(' ')}\n  stdout: ${(out.trim() || '-').slice(0, 800)}\n  stderr: ${(err.trim() || '-').slice(0, 800)}`);
+          }
+        }
         if (code === 0 && obj) return resolve(obj);
         const tail = (err.trim() || out.trim() || `退出码 ${code}`).split(/\r?\n/).slice(-1)[0];
         const e = new Error(`SDK 命令失败 (${args.join(' ')}): ${tail}`);
