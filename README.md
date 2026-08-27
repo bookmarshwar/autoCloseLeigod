@@ -156,7 +156,7 @@ npm test                     # 冒烟测试(只读)
 |---|---|---|
 | `sdkExe` | `sdk\leigod-sdk.exe` | SDK exe 路径(相对项目根目录) |
 | `dryRun` | false | true 时「关闭」只预览、不真正暂停时长 |
-| `debug` | false | true 时打印每次 SDK 调用参数与返回的完整 JSON(排查用) |
+| `debug` | false | false: 只输出重要事件(启动/守护/复查/关闭/警告); true: 全量日志(每次 SDK 调用参数与返回 JSON、轮询与键鼠探测明细) |
 | `logFile` | `watchdog.log` | 日志文件(空串则只输出控制台) |
 | `strategies` | 见上方「策略与工作流程」 | 策略0/1/2, 各自独立开关 |
 

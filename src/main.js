@@ -56,7 +56,14 @@ function now() {
          `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-function log(msg) {
+/**
+ * 分级日志:
+ *   info  —— 重要事件(启动/守护/复查/关闭/结果), 默认级别, 始终输出
+ *   debug —— 高频细节(轮询明细/探测采样/定时检查), 仅 debug=true 时输出
+ *   warn  —— 异常/降级(查询失败/探测失败/配置警告), 始终输出
+ */
+function log(msg, level = 'info') {
+  if (level === 'debug' && !cfg.debug) return;
   const line = `[${now()}] ${msg}`;
   console.log(line);
   if (cfg.logFile) {
@@ -66,6 +73,9 @@ function log(msg) {
     } catch (e) { /* 日志文件写失败不影响运行 */ }
   }
 }
+
+const logDebug = (msg) => log(msg, 'debug');
+const logWarn = (msg) => log(msg, 'warn');
 
 function ROOT_DIR() { return path.resolve(__dirname, '..'); }
 
@@ -87,7 +97,7 @@ async function closeGuard(reason, opts = {}) {
     if (opts.defer && s2.enabled) {
       log(`[策略2] 关闭前检测键鼠活动 (监听窗口 ${s2.listenSeconds}s, 全无键鼠才关闭)`);
       const r = await activity.detectActivity(s2.listenSeconds);
-      log(`[策略2] 空闲采样: ${r.samples.map((v) => (v === null ? '失败' : v + 'ms')).join(' / ')}`);
+      logDebug(`[策略2] 空闲采样: ${r.samples.map((v) => (v === null ? '失败' : v + 'ms')).join(' / ')}`);
       if (r.active) {
         log(`[策略2] 检测到键鼠活动 → 延后 ${s2.deferMinutes} 分钟再判断`);
         if (cfg.once) {
@@ -114,7 +124,7 @@ async function closeGuard(reason, opts = {}) {
       r = await sdk.pause();
     } catch (e) {
       // S-1: pause 异常不崩溃, 保持驻留等待重试
-      log(`[关闭] 暂停执行异常: ${e.message} (保持驻留, 下次复查/探测将重试)`);
+      logWarn(`[关闭] 暂停执行异常: ${e.message} (保持驻留, 下次复查/探测将重试)`);
       if (activityTimer && !cfg.strategies.strategy0.enabled) {
         log('[关闭] 策略2 独立模式继续探测, 超过阈值将重试暂停');
       } else if (cfg.strategies.strategy0.enabled) {
@@ -161,13 +171,13 @@ async function pollOnce() {
         console.error('[启动] SDK 未绑定雷神加速器, 请先执行: leigod-sdk.exe bind --auto');
         process.exit(1);
       }
-      log(`[轮询#${cycle}] time 查询失败: ${e.message} (继续轮询)`);
+      logWarn(`[轮询#${cycle}] time 查询失败: ${e.message} (继续轮询)`);
       return;
     }
     const acc = t.acc || {};
     // 先判断时长是否在计时: 时长没在消耗(state≠running)就直接延后, 不做任何判断/动作
     if (t.state !== 'running') {
-      log(`[轮询#${cycle}] 时长未在计时 (state=${t.state}), 延后判断`);
+      logDebug(`[轮询#${cycle}] 时长未在计时 (state=${t.state}), 延后判断`);
       return;
     }
 
@@ -177,7 +187,7 @@ async function pollOnce() {
     try {
       g = await sdk.game(cfg.gameQuerySeconds);
     } catch (e) {
-      log(`[轮询#${cycle}] game 查询失败: ${e.message} (继续轮询)`);
+      logWarn(`[轮询#${cycle}] game 查询失败: ${e.message} (继续轮询)`);
       return;
     }
 
@@ -187,7 +197,7 @@ async function pollOnce() {
       await enterGuard();
     } else {
       // 计时中但查不到游戏: 进入复查节奏——复查间隔后再次检测, 到时仍无游戏则自动暂停
-      log(`[轮询#${cycle}] 计时中但未识别到加速游戏 (acc=${acc.accelerating}, gameId=${g.gameId || '-'}), ${cfg.checkIntervalMinutes} 分钟后再次检测`);
+      logDebug(`[轮询#${cycle}] 计时中但未识别到加速游戏 (acc=${acc.accelerating}, gameId=${g.gameId || '-'}), ${cfg.checkIntervalMinutes} 分钟后再次检测`);
       await enterGuard();
     }
   } finally {
@@ -217,7 +227,7 @@ async function runGuardCheck() {
     try {
       t = await sdk.time();
     } catch (e) {
-      log(`[检查#${guardNo}] time 查询失败: ${e.message}, ${cfg.checkIntervalMinutes} 分钟后重试`);
+      logWarn(`[检查#${guardNo}] time 查询失败: ${e.message}, ${cfg.checkIntervalMinutes} 分钟后重试`);
       if (!cfg.once) guardTimer = setTimeout(runGuardCheck, checkMs);
       return;
     }
@@ -230,7 +240,7 @@ async function runGuardCheck() {
     try {
       g = await sdk.game(cfg.gameQuerySeconds);
     } catch (e) {
-      log(`[检查#${guardNo}] game 查询失败: ${e.message}, ${cfg.checkIntervalMinutes} 分钟后重试`);
+      logWarn(`[检查#${guardNo}] game 查询失败: ${e.message}, ${cfg.checkIntervalMinutes} 分钟后重试`);
       if (!cfg.once) guardTimer = setTimeout(runGuardCheck, checkMs);
       return;
     }
@@ -249,7 +259,7 @@ async function runGuardCheck() {
     try {
       p = await sdk.ps(keyword, cfg.processMaxResults);
     } catch (e) {
-      log(`[检查#${guardNo}] 进程搜索失败: ${e.message}, ${cfg.checkIntervalMinutes} 分钟后重试`);
+      logWarn(`[检查#${guardNo}] 进程搜索失败: ${e.message}, ${cfg.checkIntervalMinutes} 分钟后重试`);
       if (!cfg.once) guardTimer = setTimeout(runGuardCheck, checkMs);
       return;
     }
@@ -258,7 +268,7 @@ async function runGuardCheck() {
       log(`[检查#${guardNo}] 未找到进程「${keyword}」, 游戏不在运行`);
       // 二次确认: 防止 ps 枚举瞬时抽风(进程刚启动等)导致误暂停
       if (cfg.notFoundConfirmSeconds > 0) {
-        log(`[检查#${guardNo}] ${cfg.notFoundConfirmSeconds} 秒后二次确认...`);
+        logDebug(`[检查#${guardNo}] ${cfg.notFoundConfirmSeconds} 秒后二次确认...`);
         await sleep(cfg.notFoundConfirmSeconds * 1000);
         try {
           const p2 = await sdk.ps(keyword, cfg.processMaxResults);
@@ -272,7 +282,7 @@ async function runGuardCheck() {
           }
           log(`[检查#${guardNo}] 二次确认仍未找到进程「${keyword}」`);
         } catch (e) {
-          log(`[检查#${guardNo}] 二次确认进程搜索失败: ${e.message}, 按未找到处理`);
+          logWarn(`[检查#${guardNo}] 二次确认进程搜索失败: ${e.message}, 按未找到处理`);
         }
       }
       await closeGuard(`搜索进程「${keyword}」无结果${cfg.notFoundConfirmSeconds > 0 ? '(已二次确认)' : ''}`, { defer: true });
@@ -326,7 +336,7 @@ function checkScheduledClose() {
     // 不调用 stop: pause 暂停时长后雷神会自动停止加速游戏, stop 只会清除
     // game 检测到的状态, 没有额外意义
     closeGuard(`定时关闭 ${hhmm}`);
-  }).catch((e) => log(`[策略1] time 查询失败: ${e.message}`));
+  }).catch((e) => logWarn(`[策略1] time 查询失败: ${e.message}`));
 }
 
 /* ---------------- 策略2: 键鼠活动检测 ---------------- */
@@ -345,17 +355,17 @@ function startActivityGuard() {
         const r = await activity.detectActivity(s2.listenSeconds);
         if (r.samples.some((v) => v === null)) {
           // M-5: 探测失败视为有活动(fail-closed), 避免误暂停正在使用的用户
-          log('[策略2] 键鼠探测失败, 视为有活动, 重置空闲计时');
+          logWarn('[策略2] 键鼠探测失败, 视为有活动, 重置空闲计时');
           lastActiveMs = Date.now();
           return;
         }
         if (r.active) {
           lastActiveMs = Date.now();
-          log('[策略2] 检测到键鼠活动, 重置空闲计时');
+          logDebug('[策略2] 检测到键鼠活动, 重置空闲计时');
           return;
         }
         const idleMs = Date.now() - lastActiveMs;
-        log(`[策略2] 空闲中: 已连续 ${(idleMs / 60000).toFixed(1)}min / 阈值 ${s2.idleMinutes}min`);
+        logDebug(`[策略2] 空闲中: 已连续 ${(idleMs / 60000).toFixed(1)}min / 阈值 ${s2.idleMinutes}min`);
         if (idleMs >= s2.idleMinutes * 60 * 1000) {
           closeGuard(`策略2 独立模式: 连续无键鼠活动 ${s2.idleMinutes} 分钟`);
         }
@@ -384,7 +394,7 @@ async function main() {
   log(`[启动] 策略0 主流程(轮询→守护→关闭): ${s0.enabled ? `开 (轮询${cfg.pollIntervalSeconds}s/复查${cfg.checkIntervalMinutes}min/查询${cfg.gameQuerySeconds}s/进程上限${cfg.processMaxResults}/二次确认${cfg.notFoundConfirmSeconds}s)` : '关'}`);
   log(`[启动] 策略1 定时关闭: ${s1.enabled ? `开 (每天 ${s1.closeTimes.length ? s1.closeTimes.join(',') : '未设置时间'})` : '关'}`);
   if (s1.enabled && (!Array.isArray(s1.closeTimes) || s1.closeTimes.length === 0)) {
-    log('[启动] 警告: 策略1 已启用但未设置 closeTimes, 不会触发任何定时关闭 —— 请配置如 ["23:30"]');
+    logWarn('[启动] 警告: 策略1 已启用但未设置 closeTimes, 不会触发任何定时关闭 —— 请配置如 ["23:30"]');
   }
   log(`[启动] 策略2 键鼠检测: ${s2.enabled ? (s2Standalone ? `开 (独立模式: 空闲${s2.idleMinutes}min 自动暂停)` : `开 (监听 ${s2.listenSeconds}s, 有活动延后 ${s2.deferMinutes}min)`) : '关'}`);
   if (s2Standalone) {
@@ -426,7 +436,7 @@ process.on('SIGINT', () => {
 
 // S-1 兜底: 任何遗漏的 Promise 拒绝都不应击穿常驻进程
 process.on('unhandledRejection', (e) => {
-  log(`[致命] 未处理的 Promise 拒绝: ${e && e.message ? e.message : e} (看门狗保持驻留)`);
+  logWarn(`[致命] 未处理的 Promise 拒绝: ${e && e.message ? e.message : e} (看门狗保持驻留)`);
 });
 
 main().catch((e) => {

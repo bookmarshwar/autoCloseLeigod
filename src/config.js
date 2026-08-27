@@ -23,7 +23,7 @@ const PARAM_KEYS = ['pollIntervalSeconds', 'checkIntervalMinutes', 'gameQuerySec
 const DEFAULTS = {
   sdkExe: path.join(ROOT, 'sdk', 'leigod-sdk.exe'),  // 仓库内 exe(随仓库分发)
   dryRun: false,             // true 时「关闭」只预览不真正暂停
-  debug: false,              // true 时打印每次 SDK 调用参数与返回的完整 JSON
+  debug: false,              // true=全量日志(每次 SDK 调用/轮询/探测明细); false=仅重要事件
   logFile: 'watchdog.log',   // 日志文件, 空串则不写文件
   strategies: {
     // 策略0: 主流程 —— 轮询时长状态 → 询问游戏 → 复查 → 进程检查 → 暂停时长
