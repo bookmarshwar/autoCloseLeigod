@@ -17,7 +17,7 @@ const fs = require('fs');
 
 const ROOT = path.resolve(__dirname, '..');
 
-const GLOBAL_KEYS = ['sdkExe', 'dryRun', 'debug', 'logFile'];
+const GLOBAL_KEYS = ['sdkExe', 'dryRun', 'debug', 'logFile', 'recheckDelayMinutes'];
 const PARAM_KEYS = ['pollIntervalSeconds', 'checkIntervalMinutes', 'gameQuerySeconds', 'processMaxResults', 'notFoundConfirmSeconds'];
 
 const DEFAULTS = {
@@ -25,6 +25,10 @@ const DEFAULTS = {
   dryRun: false,             // true 时「关闭」只预览不真正暂停
   debug: false,              // true=全量日志(每次 SDK 调用/轮询/探测明细); false=仅重要事件
   logFile: 'watchdog.log',   // 日志文件, 空串则不写文件
+  // 关闭(暂停)后休眠: 任一策略完成暂停后, 检测类策略(策略0 轮询/策略2 探测)
+  // 休眠 recheckDelayMinutes 分钟再恢复检测(雷神已关, 无需频繁探测);
+  // 定时关闭(策略1)不受影响; 0 = 不休眠, 立即恢复
+  recheckDelayMinutes: 180,
   strategies: {
     // 策略0: 主流程 —— 轮询时长状态 → 询问游戏 → 复查 → 进程检查 → 暂停时长
     strategy0: {
@@ -60,6 +64,7 @@ const GENERATED_CONFIG = {
   dryRun: false,
   debug: false,
   logFile: 'watchdog.log',
+  recheckDelayMinutes: 180,
   strategies: {
     strategy0: {
       enabled: true,
@@ -87,6 +92,7 @@ function parseArgs(argv) {
     '--max-ps': 'processMaxResults',
     '--idle-min': 'idleMinutes',
     '--probe': 'probeIntervalSeconds',
+    '--recheck': 'recheckDelayMinutes',
     '--sdk': 'sdkExe',
   };
   for (let i = 0; i < argv.length; i++) {
@@ -185,6 +191,14 @@ function loadConfig(argv = []) {
   if (flags.strategy1) cfg.strategies.strategy1.enabled = true;
   if (flags.strategy2) cfg.strategies.strategy2.enabled = true;
   if (flags.logFile === false) cfg.logFile = null;
+  if (flags.recheckDelayMinutes !== undefined) {
+    const n = Number(flags.recheckDelayMinutes);
+    if (!Number.isFinite(n) || n < 0) {
+      console.error(`[配置] 参数 recheckDelayMinutes=${flags.recheckDelayMinutes} 无效`);
+      process.exit(1);
+    }
+    cfg.recheckDelayMinutes = n;
+  }
   if (flags.sdkExe) cfg.sdkExe = path.resolve(ROOT, flags.sdkExe);
   for (const k of PARAM_KEYS) {
     if (flags[k] !== undefined) {
@@ -218,6 +232,7 @@ function loadConfig(argv = []) {
     cfg[k] = cfg.strategies.strategy0[k];
   }
   if (cfg.pollIntervalSeconds < 5) { cfg.pollIntervalSeconds = 5; cfg.strategies.strategy0.pollIntervalSeconds = 5; }
+  if (cfg.recheckDelayMinutes < 0) cfg.recheckDelayMinutes = 0;
   if (cfg.checkIntervalMinutes < 1) { cfg.checkIntervalMinutes = 1; cfg.strategies.strategy0.checkIntervalMinutes = 1; }
   if (cfg.gameQuerySeconds < 3) { cfg.gameQuerySeconds = 3; cfg.strategies.strategy0.gameQuerySeconds = 3; }
   if (cfg.notFoundConfirmSeconds < 0) { cfg.notFoundConfirmSeconds = 0; cfg.strategies.strategy0.notFoundConfirmSeconds = 0; }

@@ -3,6 +3,7 @@
   "dryRun": false,
   "debug": false,
   "logFile": "watchdog.log",
+  "recheckDelayMinutes": 180,
   "strategies": {
     "strategy0": {
       "enabled": true,

@@ -44,6 +44,7 @@ let guardBusy = false;  // 复查执行中标记(防止计时器并发)
 let closing = false;    // 关闭动作互斥(策略1/复查/独立模式并发时只执行一次)
 let scheduleTimer = null;              // 策略1: 定时检查定时器
 let activityTimer = null;              // 策略2 独立模式: 键鼠探测定时器
+let recheckTimer = null;               // 关闭后休眠: 到期恢复检测
 const lastScheduledFired = new Map();  // 策略1: closeTime -> 当天日期(防同一天重复触发)
 const checkMs = cfg.checkIntervalMinutes * 60 * 1000;
 
@@ -83,6 +84,28 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /* ---------------- 核心动作 ---------------- */
 
+/** 关闭(暂停)成功后进入休眠: 停止轮询/探测, recheckDelayMinutes 后恢复检测 */
+function enterRecheckSleep() {
+  if (recheckTimer) { clearTimeout(recheckTimer); recheckTimer = null; }
+  if (activityTimer) { clearInterval(activityTimer); activityTimer = null; }
+  stopPolling();
+  const delay = cfg.recheckDelayMinutes * 60 * 1000;
+  if (cfg.recheckDelayMinutes <= 0) {
+    // 0 = 不休眠: 立即恢复检测(保持旧行为)
+    log('[关闭] 时长已暂停, 看门狗继续驻留监听 (Ctrl+C 退出)');
+    if (cfg.strategies.strategy0.enabled) startPolling();
+    else if (cfg.strategies.strategy2.enabled) startActivityGuard();
+    return;
+  }
+  log(`[关闭] 时长已暂停, 看门狗继续驻留监听 (Ctrl+C 退出)`);
+  log(`[休眠] 雷神已暂停, ${cfg.recheckDelayMinutes} 分钟后重新检测 (定时关闭不受影响)`);
+  recheckTimer = setTimeout(() => {
+    recheckTimer = null;
+    log('[休眠] 到期, 恢复检测');
+    if (cfg.strategies.strategy0.enabled) startPolling();
+    else if (cfg.strategies.strategy2.enabled) startActivityGuard();
+  }, delay);
+}
 /** 关闭: 暂停时长(等效界面「暂停时长」按钮, SDK 云端回放, 不动雷神任何文件) */
 async function closeGuard(reason, opts = {}) {
   if (closing) {
@@ -135,10 +158,7 @@ async function closeGuard(reason, opts = {}) {
     const ok = !!r.ok;
     log(`[关闭] 已执行暂停时长: ok=${ok} action=${r.action || '-'} httpStatus=${r.httpStatus || '-'}${r.effect ? ' effect=' + r.effect : ''}`);
     if (ok) {
-      if (activityTimer) { clearInterval(activityTimer); activityTimer = null; }  // 策略2 独立模式: 成功后停止探测
-      // 驻留文案不提及策略编号: 策略组合/模式已在启动日志交代, 行为日志只描述事实
-      log('[关闭] 时长已暂停, 看门狗继续驻留监听 (Ctrl+C 退出)');
-      if (cfg.strategies.strategy0.enabled) startPolling();  // 仅主流程模式下恢复轮询
+      enterRecheckSleep();  // 暂停成功后统一进入休眠, 到期恢复检测(策略1 定时不受影响)
     } else {
       // M-1: 失败不谎称重试——独立模式保留探测定时器, 主流程恢复轮询
       log('[关闭] 暂停执行返回异常, 保持驻留, 下次复查/探测将重试 (Ctrl+C 退出)');
@@ -383,7 +403,7 @@ async function main() {
     process.exit(1);
   }
 
-  log(`[启动] sdkExe=${exe} | dryRun=${cfg.dryRun} | debug=${cfg.debug} | once=${!!cfg.once}`);
+  log(`[启动] sdkExe=${exe} | dryRun=${cfg.dryRun} | debug=${cfg.debug} | once=${!!cfg.once} | 关闭后休眠=${cfg.recheckDelayMinutes}min`);
   const s0 = cfg.strategies.strategy0;
   const s1 = cfg.strategies.strategy1;
   const s2 = cfg.strategies.strategy2;
