@@ -119,7 +119,7 @@ function enterRecheckSleep() {
   scheduleRecheck();
 }
 /** 关闭: 暂停时长(等效界面「暂停时长」按钮, SDK 云端回放, 不动雷神任何文件) */
-async function closeGuard(reason, opts = {}) {
+async function closeGuard(reason) {
   if (closing) {
     log(`[关闭] 已有关闭动作进行中, 本次跳过: ${reason}`);
     return;
@@ -127,23 +127,6 @@ async function closeGuard(reason, opts = {}) {
   closing = true;
   try {
     log(`[关闭] 触发: ${reason}`);
-    // 策略2: 执行关闭前检测键鼠活动, 有活动则延后判断
-    const s2 = cfg.strategies.strategy2;
-    if (opts.defer && s2.enabled) {
-      log(`[策略2] 关闭前检测键鼠活动 (监听窗口 ${s2.attached.listenSeconds}s, 全无键鼠才关闭)`);
-      const r = await activity.detectActivity(s2.attached.listenSeconds);
-      logDebug(`[策略2] 空闲采样: ${r.samples.map((v) => (v === null ? '失败' : v + 'ms')).join(' / ')}`);
-      if (r.active) {
-        log(`[策略2] 检测到键鼠活动 → 延后 ${s2.attached.deferMinutes} 分钟再判断`);
-        if (cfg.once) {
-          log('[策略2] --once 诊断模式: 仅报告, 不执行任何操作');
-          process.exit(0);
-        }
-        guardTimer = setTimeout(runGuardCheck, s2.attached.deferMinutes * 60 * 1000);
-        return;
-      }
-      log('[策略2] 无键鼠活动, 继续关闭流程');
-    }
     if (cfg.once) {
       log('[关闭] --once 诊断模式: 仅报告, 不执行任何操作');
       process.exit(0);
@@ -277,7 +260,7 @@ async function runGuardCheck() {
     if (!(g.accelerating && g.gameId)) {
       // 没有游戏在加速 → 关闭
       log(`[检查#${guardNo}] 加速状态: 没有游戏在加速 (accelerating=${g.accelerating}, gameId=${g.gameId || '-'})`);
-      await closeGuard('复查时没有游戏在加速', { defer: true });
+      await closeGuard('复查时没有游戏在加速');
       return;
     }
 
@@ -314,7 +297,7 @@ async function runGuardCheck() {
           logWarn(`[检查#${guardNo}] 二次确认进程搜索失败: ${e.message}, 按未找到处理`);
         }
       }
-      await closeGuard(`搜索进程「${keyword}」无结果${cfg.notFoundConfirmSeconds > 0 ? '(已二次确认)' : ''}`, { defer: true });
+      await closeGuard(`搜索进程「${keyword}」无结果${cfg.notFoundConfirmSeconds > 0 ? '(已二次确认)' : ''}`);
       return;
     }
 
@@ -429,10 +412,9 @@ async function main() {
   if (s1.enabled && (!Array.isArray(s1.closeTimes) || s1.closeTimes.length === 0)) {
     logWarn('[启动] 警告: 策略1 已启用但未设置 closeTimes, 不会触发任何定时关闭 —— 请配置如 ["23:30"]');
   }
-  // 策略2 独立于策略0: 只要启用就运行空闲探测守护; 策略0 开启时其关闭路径
-  // 额外受 attached 组保护(关闭前探测, 有活动延后)
+  // 策略2 独立于策略0: 只要启用就运行空闲探测守护
   log(`[启动] 策略2 键鼠检测: ${s2.enabled
-    ? `开 (空闲探测: 监听${s2.standalone.listenSeconds}s/每${s2.standalone.probeIntervalSeconds}s探测/连续空闲${s2.standalone.idleMinutes}min自动暂停${s0.enabled ? `; 策略0 关闭前受 attached 组保护(监听${s2.attached.listenSeconds}s/有活动延后${s2.attached.deferMinutes}min)` : ''})`
+    ? `开 (空闲探测: 监听${s2.standalone.listenSeconds}s/每${s2.standalone.probeIntervalSeconds}s探测/连续空闲${s2.standalone.idleMinutes}min自动暂停)`
     : '关'}`);
   if (!s0.enabled && !s1.enabled && !s2.enabled) {
     log('[启动] 没有任何策略启用, 看门狗退出 (可改 config.json 的 strategies 段)');

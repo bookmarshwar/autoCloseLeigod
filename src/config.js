@@ -42,15 +42,11 @@ const DEFAULTS = {
     // 策略1: 定时关闭 —— 到达 closeTimes(HH:MM 列表)且时长在计时中 → 暂停时长
     //         (pause 后雷神会自动停止加速游戏, 不使用 stop 接口)
     strategy1: { enabled: false, closeTimes: [] },
-    // 策略2: 键鼠活动检测 —— 两种互斥模式, 参数各自归组, 不再并列冗余:
-  //  attached(依附模式, 策略0 启用): 主流程「关闭」前探测键鼠, 有活动则延后
-  //    - listenSeconds: 监听窗口(秒); deferMinutes: 延后再判断分钟数
-  //  standalone(独立模式, 策略0 关闭): 自己按探测定时器守护时长
-  //    - listenSeconds: 每次监听窗口(秒); probeIntervalSeconds: 探测间隔;
-  //      idleMinutes: 连续空闲暂停阈值(分钟)
+    // 策略2: 键鼠空闲守卫 —— 独立于策略0, 只要 enabled 就运行:
+  //  - listenSeconds: 每次监听窗口(秒); probeIntervalSeconds: 探测间隔;
+  //    idleMinutes: 连续空闲暂停阈值(分钟)
     strategy2: {
       enabled: false,
-      attached: { listenSeconds: 3, deferMinutes: 10 },
       standalone: { listenSeconds: 3, idleMinutes: 15, probeIntervalSeconds: 30 },
     },
   },
@@ -77,7 +73,6 @@ const GENERATED_CONFIG = {
     strategy1: { enabled: false, closeTimes: [] },
     strategy2: {
       enabled: false,
-      attached: { listenSeconds: 3, deferMinutes: 10 },
       standalone: { listenSeconds: 3, idleMinutes: 15, probeIntervalSeconds: 30 },
     },
   },
@@ -117,7 +112,6 @@ function loadConfig(argv = []) {
     strategy1: { ...DEFAULTS.strategies.strategy1 },
     strategy2: {
       enabled: DEFAULTS.strategies.strategy2.enabled,
-      attached: { ...DEFAULTS.strategies.strategy2.attached },
       standalone: { ...DEFAULTS.strategies.strategy2.standalone },
     },
   };
@@ -172,7 +166,7 @@ function loadConfig(argv = []) {
   }
 
   // 策略2 不再兼容旧版扁平参数(listenSeconds 等直接挂 strategy2 下):
-  // 旧字段即使出现也会被忽略删除, 参数只在 attached/standalone 子对象内生效
+  // 旧字段即使出现也会被忽略删除, 参数只在 standalone 子对象内生效
   for (const k of LEGACY_S2_KEYS) delete cfg.strategies.strategy2[k];
 
   // 兼容旧顶层写法: strategy0 未显式配置的参数回退到顶层旧字段
@@ -236,8 +230,6 @@ function loadConfig(argv = []) {
   if (cfg.checkIntervalMinutes < 1) { cfg.checkIntervalMinutes = 1; cfg.strategies.strategy0.checkIntervalMinutes = 1; }
   if (cfg.gameQuerySeconds < 3) { cfg.gameQuerySeconds = 3; cfg.strategies.strategy0.gameQuerySeconds = 3; }
   if (cfg.notFoundConfirmSeconds < 0) { cfg.notFoundConfirmSeconds = 0; cfg.strategies.strategy0.notFoundConfirmSeconds = 0; }
-  if (cfg.strategies.strategy2.attached.listenSeconds < 1) cfg.strategies.strategy2.attached.listenSeconds = 1;
-  if (cfg.strategies.strategy2.attached.deferMinutes < 1) cfg.strategies.strategy2.attached.deferMinutes = 1;
   if (cfg.strategies.strategy2.standalone.listenSeconds < 1) cfg.strategies.strategy2.standalone.listenSeconds = 1;
   // 独立模式空闲阈值下限: 0.05 分钟≈3 秒, 仅用于小阈值快速实测, 正常使用建议整分钟
   if (cfg.strategies.strategy2.standalone.idleMinutes < 0.05) cfg.strategies.strategy2.standalone.idleMinutes = 0.05;
