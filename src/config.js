@@ -52,6 +52,32 @@ const DEFAULTS = {
   },
 };
 
+const LEGACY_S2_KEYS = ['listenSeconds', 'deferMinutes', 'idleMinutes', 'probeIntervalSeconds'];
+
+// 无 config.json 时自动生成的内容(完整默认配置, sdkExe 用相对路径, 无示例值)
+const GENERATED_CONFIG = {
+  sdkExe: 'sdk\\leigod-sdk.exe',
+  dryRun: false,
+  debug: false,
+  logFile: 'watchdog.log',
+  strategies: {
+    strategy0: {
+      enabled: true,
+      pollIntervalSeconds: 30,
+      checkIntervalMinutes: 10,
+      gameQuerySeconds: 8,
+      processMaxResults: 50,
+      notFoundConfirmSeconds: 0,
+    },
+    strategy1: { enabled: false, closeTimes: [] },
+    strategy2: {
+      enabled: false,
+      attached: { listenSeconds: 3, deferMinutes: 10 },
+      standalone: { listenSeconds: 3, idleMinutes: 15, probeIntervalSeconds: 30 },
+    },
+  },
+};
+
 function parseArgs(argv) {
   const flags = {};
   const takesValue = {
@@ -92,6 +118,15 @@ function loadConfig(argv = []) {
 
   const file = path.join(ROOT, 'config.json');
   let local = {};
+  if (!fs.existsSync(file)) {
+    // 无 config.json 时自动生成一份完整默认配置(不含示例值), 便于用户直接编辑
+    try {
+      fs.writeFileSync(file, JSON.stringify(GENERATED_CONFIG, null, 2) + '\n', 'utf8');
+      console.warn(`[配置] 未找到 config.json, 已自动生成默认配置. 可按需修改后重启 (Ctrl+C 后再次 npm start)`);
+    } catch (e) {
+      console.warn(`[配置] 自动生成 config.json 失败: ${e.message} (使用内置默认值运行)`);
+    }
+  }
   if (fs.existsSync(file)) {
     try {
       // 容错: 兼容带 UTF-8 BOM 的文件(如 PowerShell Set-Content -Encoding UTF8 产物)
@@ -131,10 +166,8 @@ function loadConfig(argv = []) {
   }
 
   // 策略2 不再兼容旧版扁平参数(listenSeconds 等直接挂 strategy2 下):
-  // 旧字段即使出现也会被忽略, 参数只在 attached/standalone 子对象内生效
-  for (const k of ['listenSeconds', 'deferMinutes', 'idleMinutes', 'probeIntervalSeconds']) {
-    delete cfg.strategies.strategy2[k];
-  }
+  // 旧字段即使出现也会被忽略删除, 参数只在 attached/standalone 子对象内生效
+  for (const k of LEGACY_S2_KEYS) delete cfg.strategies.strategy2[k];
 
   // 兼容旧顶层写法: strategy0 未显式配置的参数回退到顶层旧字段
   const s0Given = (local.strategies && typeof local.strategies.strategy0 === 'object') ? local.strategies.strategy0 : {};

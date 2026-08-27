@@ -181,7 +181,8 @@ npm test                     # 冒烟测试(只读)
 > `processMaxResults` / `notFoundConfirmSeconds`)位于 `strategies.strategy0` 内,
 > 见上方「策略0」小节; 顶层仅保留全局项。
 
-没有 config.json 时使用默认值; 可 `copy config.example.json config.json`。
+没有 config.json 时**会自动生成一份默认配置**(默认策略0 开、其余关);
+可 `copy config.example.json config.json` 使用示例配置。
 
 ## CLI 参数(优先级高于 config.json)
 
