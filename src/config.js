@@ -15,6 +15,7 @@ const DEFAULTS = {
   checkIntervalMinutes: 10,  // 识别到游戏后, 复查加速状态的间隔(分钟)
   gameQuerySeconds: 8,       // 每次 game 查询最长等待(秒)
   processMaxResults: 50,     // 进程搜索最大返回数
+  notFoundConfirmSeconds: 15, // 未找到游戏进程后的二次确认等待(秒); 0 = 不确认直接关闭
   dryRun: false,             // true 时「关闭」只预览不真正暂停
   logFile: 'watchdog.log',   // 日志文件, 空串则不写文件
 };
@@ -61,7 +62,7 @@ function loadConfig(argv = []) {
   if (flags.dryRun) cfg.dryRun = true;
   if (flags.logFile === false) cfg.logFile = null;
   if (flags.sdkExe) cfg.sdkExe = path.resolve(ROOT, flags.sdkExe);
-  for (const k of ['pollIntervalSeconds', 'checkIntervalMinutes', 'gameQuerySeconds', 'processMaxResults']) {
+  for (const k of ['pollIntervalSeconds', 'checkIntervalMinutes', 'gameQuerySeconds', 'processMaxResults', 'notFoundConfirmSeconds']) {
     if (flags[k] !== undefined) {
       const n = Number(flags[k]);
       if (!Number.isFinite(n) || n <= 0) {
@@ -76,6 +77,7 @@ function loadConfig(argv = []) {
   if (cfg.pollIntervalSeconds < 5) cfg.pollIntervalSeconds = 5;
   if (cfg.checkIntervalMinutes < 1) cfg.checkIntervalMinutes = 1;
   if (cfg.gameQuerySeconds < 3) cfg.gameQuerySeconds = 3;
+  if (cfg.notFoundConfirmSeconds < 0) cfg.notFoundConfirmSeconds = 0;
   return cfg;
 }
 

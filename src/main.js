@@ -53,6 +53,8 @@ function log(msg) {
 
 function ROOT_DIR() { return path.resolve(__dirname, '..'); }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /* ---------------- 核心动作 ---------------- */
 
 /** 关闭: 暂停时长(等效界面「暂停时长」按钮, SDK 云端回放, 不动雷神任何文件) */
@@ -70,11 +72,12 @@ async function closeGuard(reason) {
   const ok = !!r.ok;
   log(`[关闭] 已执行暂停时长: ok=${ok} action=${r.action || '-'} httpStatus=${r.httpStatus || '-'}${r.effect ? ' effect=' + r.effect : ''}`);
   if (ok) {
-    log('[关闭] 完成, 看门狗退出。需要恢复时: 雷神界面点「开启时长」或 leigod-sdk.exe resume --force');
+    log('[关闭] 时长已暂停。看门狗继续驻留监听: 下次开启加速会自动重新守护 (Ctrl+C 退出)');
   } else {
-    log('[关闭] 暂停执行失败, 请查看上方输出');
+    log('[关闭] 暂停执行失败, 继续驻留, 下次复查会重试 (Ctrl+C 退出)');
   }
-  process.exit(ok ? 0 : 1);
+  // 不管成功失败都不退出: 常驻看门狗, 等待用户下次开启加速
+  startPolling();
 }
 
 /** 轮询一次: 查询加速状态; 加速中则询问是否有加速游戏 */
@@ -163,7 +166,26 @@ async function runGuardCheck() {
 
     if (p.count === 0) {
       log(`[检查#${guardNo}] 未找到进程「${keyword}」, 游戏不在运行`);
-      await closeGuard(`搜索进程「${keyword}」无结果`);
+      // 二次确认: 防止 ps 枚举瞬时抽风(进程刚启动等)导致误暂停
+      if (cfg.notFoundConfirmSeconds > 0) {
+        log(`[检查#${guardNo}] ${cfg.notFoundConfirmSeconds} 秒后二次确认...`);
+        await sleep(cfg.notFoundConfirmSeconds * 1000);
+        try {
+          const p2 = await sdk.ps(keyword, cfg.processMaxResults);
+          if (p2.count > 0) {
+            const names = p2.processes
+              .map((pr) => pr.name + (pr.windowTitle ? `("${pr.windowTitle}")` : ''))
+              .join(', ');
+            log(`[检查#${guardNo}] 二次确认发现进程「${keyword}」: ${names}, 游戏仍在运行, ${cfg.checkIntervalMinutes} 分钟后再次复查`);
+            if (!cfg.once) guardTimer = setTimeout(runGuardCheck, checkMs);
+            return;
+          }
+          log(`[检查#${guardNo}] 二次确认仍未找到进程「${keyword}」`);
+        } catch (e) {
+          log(`[检查#${guardNo}] 二次确认进程搜索失败: ${e.message}, 按未找到处理`);
+        }
+      }
+      await closeGuard(`搜索进程「${keyword}」无结果${cfg.notFoundConfirmSeconds > 0 ? '(已二次确认)' : ''}`);
       return;
     }
 
@@ -180,6 +202,13 @@ async function runGuardCheck() {
 
 function stopPolling() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+/** 启动轮询(先注册 timer 再跑第一轮, 保证 stopPolling 生效) */
+function startPolling() {
+  stopPolling();
+  pollTimer = setInterval(() => pollOnce(), cfg.pollIntervalSeconds * 1000);
+  pollOnce();
 }
 
 /* ---------------- 启动 ---------------- */
@@ -214,10 +243,7 @@ async function main() {
   }
 
   log('[启动] 开始轮询加速状态 (Ctrl+C 退出)');
-  // 注意: 必须先注册 interval 再跑第一轮, 否则第一轮进入计时阶段时
-  //       pollTimer 还是 null, stopPolling() 清不掉轮询 → 轮询无法停止
-  pollTimer = setInterval(() => pollOnce(), cfg.pollIntervalSeconds * 1000);
-  await pollOnce();
+  startPolling();
 }
 
 process.on('SIGINT', () => {
