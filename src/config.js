@@ -41,9 +41,9 @@ const DEFAULTS = {
     // 策略2: 键鼠活动检测 —— 两种模式:
   //  依附模式(策略0 启用): 执行「关闭」前用 GetLastInputInfo 监听键鼠
   //    (窗口 listenSeconds 秒); 检测到活动 → 延后 deferMinutes 分钟再判断
-  //  独立模式(策略0 关闭): 自身每轮询间隔探测键鼠, 连续空闲 idleMinutes
-  //    分钟后自动暂停时长
-    strategy2: { enabled: false, listenSeconds: 3, deferMinutes: 10, idleMinutes: 15 },
+  //  独立模式(策略0 关闭): 按 probeIntervalSeconds 间隔探测键鼠, 连续空闲
+  //    idleMinutes 分钟后自动暂停时长(探测间隔与策略0 参数无关)
+    strategy2: { enabled: false, listenSeconds: 3, deferMinutes: 10, idleMinutes: 15, probeIntervalSeconds: 30 },
   },
 };
 
@@ -55,6 +55,7 @@ function parseArgs(argv) {
     '--game-seconds': 'gameQuerySeconds',
     '--max-ps': 'processMaxResults',
     '--idle-min': 'idleMinutes',
+    '--probe': 'probeIntervalSeconds',
     '--sdk': 'sdkExe',
   };
   for (let i = 0; i < argv.length; i++) {
@@ -149,6 +150,14 @@ function loadConfig(argv = []) {
     }
     cfg.strategies.strategy2.idleMinutes = n;
   }
+  if (flags.probeIntervalSeconds !== undefined) {
+    const n = Number(flags.probeIntervalSeconds);
+    if (!Number.isFinite(n) || n <= 0) {
+      console.error(`[配置] 参数 probeIntervalSeconds=${flags.probeIntervalSeconds} 无效`);
+      process.exit(1);
+    }
+    cfg.strategies.strategy2.probeIntervalSeconds = n;
+  }
 
   // 回填顶层(兼容代码直接读 cfg.pollIntervalSeconds) + 兜底下限
   for (const k of PARAM_KEYS) {
@@ -161,6 +170,7 @@ function loadConfig(argv = []) {
   if (cfg.strategies.strategy2.listenSeconds < 1) cfg.strategies.strategy2.listenSeconds = 1;
   if (cfg.strategies.strategy2.deferMinutes < 1) cfg.strategies.strategy2.deferMinutes = 1;
   if (cfg.strategies.strategy2.idleMinutes < 0.05) cfg.strategies.strategy2.idleMinutes = 0.05;
+  if (cfg.strategies.strategy2.probeIntervalSeconds < 1) cfg.strategies.strategy2.probeIntervalSeconds = 1;
 
   // 策略1 closeTimes 规范化: "H:MM" → "HH:MM"(匹配用补零格式), 非法项忽略并警告
   if (Array.isArray(cfg.strategies.strategy1.closeTimes)) {

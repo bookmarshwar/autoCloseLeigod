@@ -13,6 +13,6 @@
       "notFoundConfirmSeconds": 0
     },
     "strategy1": { "enabled": false, "closeTimes": ["23:30"] },
-    "strategy2": { "enabled": false, "listenSeconds": 3, "deferMinutes": 10, "idleMinutes": 15 }
+    "strategy2": { "enabled": false, "listenSeconds": 3, "deferMinutes": 10, "idleMinutes": 15, "probeIntervalSeconds": 30 }
   }
 }

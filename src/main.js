@@ -344,7 +344,7 @@ function checkScheduledClose() {
 /** 策略2 独立模式(主流程关闭时): 周期性探测键鼠, 连续空闲超过 idleMinutes 自动暂停 */
 function startActivityGuard() {
   const s2 = cfg.strategies.strategy2;
-  log(`[策略2] 独立模式启动: 每 ${cfg.pollIntervalSeconds}s 探测键鼠, 连续空闲超过 ${s2.idleMinutes}min 自动暂停时长`);
+  log(`[策略2] 独立模式启动: 每 ${s2.probeIntervalSeconds}s 探测键鼠, 连续空闲超过 ${s2.idleMinutes}min 自动暂停时长`);
   let lastActiveMs = Date.now();
   let busy = false;  // S-2: 探测最长耗时可能超过间隔, 禁止并发 tick
   activityTimer = setInterval(() => {
@@ -373,7 +373,7 @@ function startActivityGuard() {
         busy = false;
       }
     })();
-  }, cfg.pollIntervalSeconds * 1000);
+  }, s2.probeIntervalSeconds * 1000);
 }
 
 /* ---------------- 启动 ---------------- */

@@ -107,7 +107,7 @@
 配置:
 
 ```json
-"strategy2": { "enabled": true, "listenSeconds": 3, "deferMinutes": 10, "idleMinutes": 15 }
+"strategy2": { "enabled": true, "listenSeconds": 3, "deferMinutes": 10, "idleMinutes": 15, "probeIntervalSeconds": 30 }
 ```
 
 **依附模式**(策略0 主流程启用时)——关闭前延后判断:
@@ -123,7 +123,7 @@
 **独立模式**(策略0 主流程关闭时)——自己按空闲探测守护:
 
 ```
-每 pollIntervalSeconds 探测一次键鼠
+每 probeIntervalSeconds(默认 30s)探测一次键鼠
  ├─ 检测到键鼠活动 → 重置空闲计时
  └─ 无键鼠活动 → 累计空闲时间
       └─ 连续空闲超过 idleMinutes 分钟 ──► ⛔ 关闭: pause --force
@@ -135,6 +135,7 @@
 | `listenSeconds` | 3 | 每次探测的监听窗口(秒) |
 | `deferMinutes` | 10 | 依附模式: 检测到活动后延后再判断的分钟数 |
 | `idleMinutes` | 15 | 独立模式: 连续无键鼠活动的暂停阈值(分钟) |
+| `probeIntervalSeconds` | 30 | 独立模式: 键鼠探测间隔(秒), **与策略0 的轮询间隔无关** |
 
 - 实现: Win32 `GetLastInputInfo`, **纯查询、无钩子/驱动**, 与雷神无关。
 - 两种模式自动切换: 主流程(策略0)开→依附模式; 主流程关→独立模式(此时
@@ -180,6 +181,8 @@ npm test                     # 冒烟测试(只读)
 --strategy0          临时开启策略0(主流程, 默认开)
 --strategy1          临时开启策略1(定时关闭, 时间取自 config.json)
 --strategy2          临时开启策略2(键鼠活动检测延后)
+--probe <秒>         策略2 独立模式探测间隔(默认 30s)
+--idle-min <分钟>    策略2 独立模式空闲阈值(默认 15)
 ```
 
 ## 已知局限
