@@ -38,14 +38,21 @@ const DEFAULTS = {
     // 策略1: 定时关闭 —— 到达 closeTimes(HH:MM 列表)且时长在计时中 → 暂停时长
     //         (pause 后雷神会自动停止加速游戏, 不使用 stop 接口)
     strategy1: { enabled: false, closeTimes: [] },
-    // 策略2: 键鼠活动检测 —— 两种模式:
-  //  依附模式(策略0 启用): 执行「关闭」前用 GetLastInputInfo 监听键鼠
-  //    (窗口 listenSeconds 秒); 检测到活动 → 延后 deferMinutes 分钟再判断
-  //  独立模式(策略0 关闭): 按 probeIntervalSeconds 间隔探测键鼠, 连续空闲
-  //    idleMinutes 分钟后自动暂停时长(探测间隔与策略0 参数无关)
-    strategy2: { enabled: false, listenSeconds: 3, deferMinutes: 10, idleMinutes: 15, probeIntervalSeconds: 30 },
+    // 策略2: 键鼠活动检测 —— 两种互斥模式, 参数各自归组, 不再并列冗余:
+  //  attached(依附模式, 策略0 启用): 主流程「关闭」前探测键鼠, 有活动则延后
+  //    - listenSeconds: 监听窗口(秒); deferMinutes: 延后再判断分钟数
+  //  standalone(独立模式, 策略0 关闭): 自己按探测定时器守护时长
+  //    - listenSeconds: 每次监听窗口(秒); probeIntervalSeconds: 探测间隔;
+  //      idleMinutes: 连续空闲暂停阈值(分钟)
+    strategy2: {
+      enabled: false,
+      attached: { listenSeconds: 3, deferMinutes: 10 },
+      standalone: { listenSeconds: 3, idleMinutes: 15, probeIntervalSeconds: 30 },
+    },
   },
 };
+
+const LEGACY_S2_KEYS = ['listenSeconds', 'deferMinutes', 'idleMinutes', 'probeIntervalSeconds'];
 
 function parseArgs(argv) {
   const flags = {};
@@ -78,7 +85,11 @@ function loadConfig(argv = []) {
   cfg.strategies = {
     strategy0: { ...DEFAULTS.strategies.strategy0 },
     strategy1: { ...DEFAULTS.strategies.strategy1 },
-    strategy2: { ...DEFAULTS.strategies.strategy2 },
+    strategy2: {
+      enabled: DEFAULTS.strategies.strategy2.enabled,
+      attached: { ...DEFAULTS.strategies.strategy2.attached },
+      standalone: { ...DEFAULTS.strategies.strategy2.standalone },
+    },
   };
 
   const file = path.join(ROOT, 'config.json');
@@ -105,13 +116,38 @@ function loadConfig(argv = []) {
     if (local.logFile === '') cfg.logFile = null;
   }
 
-  // 策略深度合并: 只覆盖显式给出的字段
-  for (const key of Object.keys(DEFAULTS.strategies)) {
-    const src = local.strategies && local.strategies[key];
-    if (src && typeof src === 'object') {
-      for (const f of Object.keys(src)) cfg.strategies[key][f] = src[f];
+  // 策略深度合并(递归): 只覆盖显式给出的字段, 子对象(如 attached/standalone)局部覆盖
+  function deepAssign(dst, src) {
+    for (const k of Object.keys(src)) {
+      const v = src[k];
+      if (v && typeof v === 'object' && !Array.isArray(v) && dst[k] && typeof dst[k] === 'object' && !Array.isArray(dst[k])) {
+        deepAssign(dst[k], v);
+      } else {
+        dst[k] = v;
+      }
     }
   }
+  for (const key of Object.keys(DEFAULTS.strategies)) {
+    const src = local.strategies && local.strategies[key];
+    if (src && typeof src === 'object') deepAssign(cfg.strategies[key], src);
+  }
+
+  // 策略2 旧版扁平写法兼容: strategy2 直接挂 listenSeconds/deferMinutes/
+  // idleMinutes/probeIntervalSeconds → 自动映射到 attached/standalone 子对象
+  const s2Given = (local.strategies && typeof local.strategies.strategy2 === 'object') ? local.strategies.strategy2 : {};
+  if (LEGACY_S2_KEYS.some((k) => s2Given[k] !== undefined)) {
+    console.warn('[配置] strategy2 检测到旧版扁平参数, 已自动映射到 attached/standalone 子对象 (推荐迁移: 见 README「策略2」)');
+    const at = cfg.strategies.strategy2.attached;
+    const st = cfg.strategies.strategy2.standalone;
+    const atGiven = (s2Given.attached && typeof s2Given.attached === 'object') ? s2Given.attached : {};
+    const stGiven = (s2Given.standalone && typeof s2Given.standalone === 'object') ? s2Given.standalone : {};
+    if (atGiven.listenSeconds === undefined && s2Given.listenSeconds !== undefined) at.listenSeconds = s2Given.listenSeconds;
+    if (atGiven.deferMinutes === undefined && s2Given.deferMinutes !== undefined) at.deferMinutes = s2Given.deferMinutes;
+    if (stGiven.listenSeconds === undefined && s2Given.listenSeconds !== undefined) st.listenSeconds = s2Given.listenSeconds;
+    if (stGiven.idleMinutes === undefined && s2Given.idleMinutes !== undefined) st.idleMinutes = s2Given.idleMinutes;
+    if (stGiven.probeIntervalSeconds === undefined && s2Given.probeIntervalSeconds !== undefined) st.probeIntervalSeconds = s2Given.probeIntervalSeconds;
+  }
+  for (const k of LEGACY_S2_KEYS) delete cfg.strategies.strategy2[k];  // 清理顶层残留
 
   // 兼容旧顶层写法: strategy0 未显式配置的参数回退到顶层旧字段
   const s0Given = (local.strategies && typeof local.strategies.strategy0 === 'object') ? local.strategies.strategy0 : {};
@@ -146,7 +182,7 @@ function loadConfig(argv = []) {
       console.error(`[配置] 参数 idleMinutes=${flags.idleMinutes} 无效`);
       process.exit(1);
     }
-    cfg.strategies.strategy2.idleMinutes = n;
+    cfg.strategies.strategy2.standalone.idleMinutes = n;
   }
   if (flags.probeIntervalSeconds !== undefined) {
     const n = Number(flags.probeIntervalSeconds);
@@ -154,7 +190,7 @@ function loadConfig(argv = []) {
       console.error(`[配置] 参数 probeIntervalSeconds=${flags.probeIntervalSeconds} 无效`);
       process.exit(1);
     }
-    cfg.strategies.strategy2.probeIntervalSeconds = n;
+    cfg.strategies.strategy2.standalone.probeIntervalSeconds = n;
   }
 
   // 回填顶层(兼容代码直接读 cfg.pollIntervalSeconds) + 兜底下限
@@ -165,11 +201,12 @@ function loadConfig(argv = []) {
   if (cfg.checkIntervalMinutes < 1) { cfg.checkIntervalMinutes = 1; cfg.strategies.strategy0.checkIntervalMinutes = 1; }
   if (cfg.gameQuerySeconds < 3) { cfg.gameQuerySeconds = 3; cfg.strategies.strategy0.gameQuerySeconds = 3; }
   if (cfg.notFoundConfirmSeconds < 0) { cfg.notFoundConfirmSeconds = 0; cfg.strategies.strategy0.notFoundConfirmSeconds = 0; }
-  if (cfg.strategies.strategy2.listenSeconds < 1) cfg.strategies.strategy2.listenSeconds = 1;
-  if (cfg.strategies.strategy2.deferMinutes < 1) cfg.strategies.strategy2.deferMinutes = 1;
+  if (cfg.strategies.strategy2.attached.listenSeconds < 1) cfg.strategies.strategy2.attached.listenSeconds = 1;
+  if (cfg.strategies.strategy2.attached.deferMinutes < 1) cfg.strategies.strategy2.attached.deferMinutes = 1;
+  if (cfg.strategies.strategy2.standalone.listenSeconds < 1) cfg.strategies.strategy2.standalone.listenSeconds = 1;
   // 独立模式空闲阈值下限: 0.05 分钟≈3 秒, 仅用于小阈值快速实测, 正常使用建议整分钟
-  if (cfg.strategies.strategy2.idleMinutes < 0.05) cfg.strategies.strategy2.idleMinutes = 0.05;
-  if (cfg.strategies.strategy2.probeIntervalSeconds < 1) cfg.strategies.strategy2.probeIntervalSeconds = 1;
+  if (cfg.strategies.strategy2.standalone.idleMinutes < 0.05) cfg.strategies.strategy2.standalone.idleMinutes = 0.05;
+  if (cfg.strategies.strategy2.standalone.probeIntervalSeconds < 1) cfg.strategies.strategy2.standalone.probeIntervalSeconds = 1;
 
   // 策略1 closeTimes 规范化: "H:MM" → "HH:MM"(匹配用补零格式), 非法项忽略并警告
   if (Array.isArray(cfg.strategies.strategy1.closeTimes)) {

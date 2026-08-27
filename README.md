@@ -104,59 +104,58 @@
   人还在电脑前也会暂停——这正是睡前兜底的本意)。
 - `--strategy1` 参数可临时开启(时间仍需在配置里给出)。
 
-### 策略2: 键鼠活动检测(双模式)
+### 策略2: 键鼠活动检测(双模式, 参数按模式分组)
 
 配置:
 
 ```json
-"strategy2": { "enabled": true, "listenSeconds": 3, "deferMinutes": 10, "idleMinutes": 15, "probeIntervalSeconds": 30 }
+"strategy2": {
+  "enabled": true,
+  "attached":   { "listenSeconds": 3, "deferMinutes": 10 },
+  "standalone": { "listenSeconds": 3, "idleMinutes": 15, "probeIntervalSeconds": 30 }
+}
 ```
 
-**依附模式**(策略0 主流程启用时)——关闭前延后判断:
+**依附模式**(策略0 主流程启用时)用 `attached` 组——关闭前延后判断:
 
 ```
 即将执行「关闭」时
- ├─ 探测系统最后键鼠输入(listenSeconds 秒窗口, 起点/终点各采样一次)
- │    ├─ 检测到键鼠活动 → 延后 deferMinutes 分钟再判断(人还在电脑前,
+ ├─ 探测系统最后键鼠输入(attached.listenSeconds 秒窗口, 起点/终点各采样一次)
+ │    ├─ 检测到键鼠活动 → 延后 attached.deferMinutes 分钟再判断(人还在电脑前,
  │    │      可能是正在启动游戏/临时忙, 不急着暂停)
  │    └─ 无键鼠活动(或探测失败, 按无活动处理) → 继续关闭流程
 ```
 
-**独立模式**(策略0 主流程关闭时)——自己按空闲探测守护:
+**独立模式**(策略0 主流程关闭时)用 `standalone` 组——自己按空闲探测守护:
 
 ```
-每 probeIntervalSeconds(默认 30s)探测一次键鼠
+每 standalone.probeIntervalSeconds(默认 30s)探测一次键鼠
  ├─ 检测到键鼠活动 → 重置空闲计时
  └─ 无键鼠活动 → 累计空闲时间
-      └─ 连续空闲超过 idleMinutes 分钟 ──► ⛔ 关闭: pause --force
+      └─ 连续空闲超过 standalone.idleMinutes 分钟 ──► ⛔ 关闭: pause --force
 ```
 
-| 参数 | 默认 | 说明 |
-|---|---|---|
-| `enabled` | false | 策略2 开关 |
-| `listenSeconds` | 3 | 每次探测的监听窗口(秒), 两模式共用 |
-| `deferMinutes` | 10 | **仅依附模式**: 检测到活动后延后再判断的分钟数 |
-| `idleMinutes` | 15 | **仅独立模式**: 连续无键鼠活动的暂停阈值(分钟) |
-| `probeIntervalSeconds` | 30 | **仅独立模式**: 键鼠探测间隔(秒), 与策略0 的轮询间隔无关 |
+| 参数 | 默认 | 模式 | 说明 |
+|---|---|---|---|
+| `enabled` | false | — | 策略2 开关 |
+| `attached.listenSeconds` | 3 | 依附 | 关闭前探测的监听窗口(秒) |
+| `attached.deferMinutes` | 10 | 依附 | 检测到活动后延后再判断的分钟数 |
+| `standalone.listenSeconds` | 3 | 独立 | 每次探测的监听窗口(秒) |
+| `standalone.idleMinutes` | 15 | 独立 | 连续无键鼠活动的暂停阈值(分钟) |
+| `standalone.probeIntervalSeconds` | 30 | 独立 | 键鼠探测间隔(秒), 与策略0 轮询间隔无关 |
 
-**模式 × 参数生效矩阵(哪个参数在哪个模式下生效):**
-
-| 参数 | 依附模式(策略0 开) | 独立模式(策略0 关) |
-|---|---|---|
-| `listenSeconds` | ✅ 生效 | ✅ 生效 |
-| `deferMinutes` | ✅ 生效 | ❌ 忽略 |
-| `idleMinutes` | ❌ 忽略 | ✅ 生效 |
-| `probeIntervalSeconds` | ❌ 忽略 | ✅ 生效 |
-
-> 启动日志会打印当前模式及「当前忽略」的参数, 配置后以此为准核对。
+> 各模式参数已按 `attached` / `standalone` 分组, **只在自己模式生效, 互不干扰**;
+> 旧版扁平写法(`listenSeconds`/`deferMinutes`/`idleMinutes`/`probeIntervalSeconds`
+> 直接挂 `strategy2` 下)仍兼容, 会自动映射到两个子对象并在启动时提示一次。
 
 - 实现: Win32 `GetLastInputInfo`, **纯查询、无钩子/驱动**, 与雷神无关。
 - 两种模式自动切换: 主流程(策略0)开→依附模式; 主流程关→独立模式(此时
   关掉策略2 且策略0/1 也关 → 看门狗退出)。
 - **探测失败的处理两模式相反**: 依附模式「探测失败=无活动」(不阻塞关闭);
   独立模式「探测失败=有活动」(重置空闲计时, 防止误暂停在用电脑的人)。
-- `--strategy2` 参数可临时开启; `--probe <秒>` 调独立模式探测间隔;
-  `--idle-min <分钟>` 调独立模式阈值。
+- `--strategy2` 参数可临时开启; `--probe <秒>` 调独立模式探测间隔
+  (standalone.probeIntervalSeconds); `--idle-min <分钟>` 调独立模式阈值
+  (standalone.idleMinutes)。
 
 ## 使用
 

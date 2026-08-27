@@ -95,16 +95,16 @@ async function closeGuard(reason, opts = {}) {
     // 策略2: 执行关闭前检测键鼠活动, 有活动则延后判断
     const s2 = cfg.strategies.strategy2;
     if (opts.defer && s2.enabled) {
-      log(`[策略2] 关闭前检测键鼠活动 (监听窗口 ${s2.listenSeconds}s, 全无键鼠才关闭)`);
-      const r = await activity.detectActivity(s2.listenSeconds);
+      log(`[策略2] 关闭前检测键鼠活动 (监听窗口 ${s2.attached.listenSeconds}s, 全无键鼠才关闭)`);
+      const r = await activity.detectActivity(s2.attached.listenSeconds);
       logDebug(`[策略2] 空闲采样: ${r.samples.map((v) => (v === null ? '失败' : v + 'ms')).join(' / ')}`);
       if (r.active) {
-        log(`[策略2] 检测到键鼠活动 → 延后 ${s2.deferMinutes} 分钟再判断`);
+        log(`[策略2] 检测到键鼠活动 → 延后 ${s2.attached.deferMinutes} 分钟再判断`);
         if (cfg.once) {
           log('[策略2] --once 诊断模式: 仅报告, 不执行任何操作');
           process.exit(0);
         }
-        guardTimer = setTimeout(runGuardCheck, s2.deferMinutes * 60 * 1000);
+        guardTimer = setTimeout(runGuardCheck, s2.attached.deferMinutes * 60 * 1000);
         return;
       }
       log('[策略2] 无键鼠活动, 继续关闭流程');
@@ -343,7 +343,7 @@ function checkScheduledClose() {
 
 /** 策略2 独立模式(主流程关闭时): 周期性探测键鼠, 连续空闲超过 idleMinutes 自动暂停 */
 function startActivityGuard() {
-  const s2 = cfg.strategies.strategy2;
+  const s2 = cfg.strategies.strategy2.standalone;
   log(`[策略2] 独立模式启动: 每 ${s2.probeIntervalSeconds}s 探测键鼠, 连续空闲超过 ${s2.idleMinutes}min 自动暂停时长`);
   let lastActiveMs = Date.now();
   let busy = false;  // S-2: 探测最长耗时可能超过间隔, 禁止并发 tick
@@ -397,9 +397,9 @@ async function main() {
     logWarn('[启动] 警告: 策略1 已启用但未设置 closeTimes, 不会触发任何定时关闭 —— 请配置如 ["23:30"]');
   }
   // A2/C6: 启动日志按模式打印「生效+忽略」参数, 避免"写了没生效"的困惑
-  log(`[启动] 策略2 键鼠检测: ${s2.enabled ? (s2Standalone
-    ? `开 (独立模式: 监听${s2.listenSeconds}s/每${s2.probeIntervalSeconds}s探测/连续空闲${s2.idleMinutes}min自动暂停; 当前忽略: deferMinutes)`
-    : `开 (依附模式: 监听${s2.listenSeconds}s, 有活动延后${s2.deferMinutes}min再判断; 当前忽略: idleMinutes/probeIntervalSeconds)`)
+  log(`[启动] 策略2 键鼠检测: ${cfg.strategies.strategy2.enabled ? (s2Standalone
+    ? `开 (独立模式: 监听${cfg.strategies.strategy2.standalone.listenSeconds}s/每${cfg.strategies.strategy2.standalone.probeIntervalSeconds}s探测/连续空闲${cfg.strategies.strategy2.standalone.idleMinutes}min自动暂停; 当前忽略: attached.deferMinutes)`
+    : `开 (依附模式: 监听${cfg.strategies.strategy2.attached.listenSeconds}s, 有活动延后${cfg.strategies.strategy2.attached.deferMinutes}min再判断; 当前忽略: standalone.idleMinutes/standalone.probeIntervalSeconds)`)
     : '关'}`);
   if (s2Standalone) {
     log('[启动] 策略2 以独立模式运行: 主流程未启用, 直接按键鼠空闲探测守护时长');
@@ -413,10 +413,11 @@ async function main() {
     if (!s0.enabled) {
       if (s2Standalone) {
         // B6: 独立模式下 --once 支持"探测一次+报告"
+        const st = cfg.strategies.strategy2.standalone;
         log('[--once] 独立模式诊断: 探测一次键鼠状态');
-        const r = await activity.detectActivity(s2.listenSeconds);
+        const r = await activity.detectActivity(st.listenSeconds);
         log(`[--once] 空闲采样: ${r.samples.map((v) => (v === null ? '失败' : v + 'ms')).join(' / ')} → ${r.active ? '有键鼠活动' : '无键鼠活动'}`);
-        log(`[--once] 独立模式将按此节奏运行: 每 ${s2.probeIntervalSeconds}s 探测, 连续空闲 ${s2.idleMinutes}min 自动暂停`);
+        log(`[--once] 独立模式将按此节奏运行: 每 ${st.probeIntervalSeconds}s 探测, 连续空闲 ${st.idleMinutes}min 自动暂停`);
         process.exit(0);
       }
       log('[--once] 主流程(策略0)已关闭, 无可诊断内容');
