@@ -93,7 +93,14 @@ function loadConfig(argv = []) {
       process.exit(1);
     }
     for (const k of GLOBAL_KEYS) {
-      if (local[k] !== undefined && local[k] !== null) cfg[k] = local[k];
+      if (local[k] === undefined || local[k] === null) continue;
+      // M-3: config.json 里的相对路径统一相对项目根目录解析(与 CLI --sdk 一致),
+      //       避免从其他目录启动时按 CWD 解析导致 sdkExe 找不到
+      if (k === 'sdkExe') {
+        cfg.sdkExe = path.isAbsolute(local.sdkExe) ? local.sdkExe : path.resolve(ROOT, local.sdkExe);
+      } else {
+        cfg[k] = local[k];
+      }
     }
     if (local.logFile === '') cfg.logFile = null;
   }

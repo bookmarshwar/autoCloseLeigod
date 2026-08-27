@@ -41,6 +41,7 @@ let pollTimer = null;   // 轮询定时器
 let guardTimer = null;  // 复查计时器
 let pollBusy = false;   // 轮询执行中标记(防止 interval 重叠)
 let guardBusy = false;  // 复查执行中标记(防止计时器并发)
+let closing = false;    // 关闭动作互斥(策略1/复查/独立模式并发时只执行一次)
 let scheduleTimer = null;              // 策略1: 定时检查定时器
 let activityTimer = null;              // 策略2 独立模式: 键鼠探测定时器
 const lastScheduledFired = new Map();  // 策略1: closeTime -> 当天日期(防同一天重复触发)
@@ -74,46 +75,74 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** 关闭: 暂停时长(等效界面「暂停时长」按钮, SDK 云端回放, 不动雷神任何文件) */
 async function closeGuard(reason, opts = {}) {
-  log(`[关闭] 触发: ${reason}`);
-  // 策略2: 执行关闭前检测键鼠活动, 有活动则延后判断
-  const s2 = cfg.strategies.strategy2;
-  if (opts.defer && s2.enabled) {
-    log(`[策略2] 关闭前检测键鼠活动 (监听窗口 ${s2.listenSeconds}s, 全无键鼠才关闭)`);
-    const r = await activity.detectActivity(s2.listenSeconds);
-    log(`[策略2] 空闲采样: ${r.samples.map((v) => (v === null ? '失败' : v + 'ms')).join(' / ')}`);
-    if (r.active) {
-      log(`[策略2] 检测到键鼠活动 → 延后 ${s2.deferMinutes} 分钟再判断`);
-      if (cfg.once) {
-        log('[策略2] --once 诊断模式: 仅报告, 不执行任何操作');
-        process.exit(0);
+  if (closing) {
+    log(`[关闭] 已有关闭动作进行中, 本次跳过: ${reason}`);
+    return;
+  }
+  closing = true;
+  try {
+    log(`[关闭] 触发: ${reason}`);
+    // 策略2: 执行关闭前检测键鼠活动, 有活动则延后判断
+    const s2 = cfg.strategies.strategy2;
+    if (opts.defer && s2.enabled) {
+      log(`[策略2] 关闭前检测键鼠活动 (监听窗口 ${s2.listenSeconds}s, 全无键鼠才关闭)`);
+      const r = await activity.detectActivity(s2.listenSeconds);
+      log(`[策略2] 空闲采样: ${r.samples.map((v) => (v === null ? '失败' : v + 'ms')).join(' / ')}`);
+      if (r.active) {
+        log(`[策略2] 检测到键鼠活动 → 延后 ${s2.deferMinutes} 分钟再判断`);
+        if (cfg.once) {
+          log('[策略2] --once 诊断模式: 仅报告, 不执行任何操作');
+          process.exit(0);
+        }
+        guardTimer = setTimeout(runGuardCheck, s2.deferMinutes * 60 * 1000);
+        return;
       }
-      guardTimer = setTimeout(runGuardCheck, s2.deferMinutes * 60 * 1000);
+      log('[策略2] 无键鼠活动, 继续关闭流程');
+    }
+    if (cfg.once) {
+      log('[关闭] --once 诊断模式: 仅报告, 不执行任何操作');
+      process.exit(0);
+    }
+    if (cfg.dryRun) {
+      // dry-run 预览不退出: 保持驻留, 等待下一次判断(S-3)
+      log('[关闭] dry-run: 不真正暂停时长 (去掉 config.dryRun 或注释后生效)');
+      log('[关闭] 保持驻留, 等待下一次判断 (Ctrl+C 退出)');
       return;
     }
-    log('[策略2] 无键鼠活动, 继续关闭流程');
-  }
-  if (cfg.once) {
-    log('[关闭] --once 诊断模式: 仅报告, 不执行任何操作');
-    process.exit(0);
-  }
-  if (cfg.dryRun) {
-    log('[关闭] dry-run: 不真正暂停时长 (去掉 config.dryRun 或注释后生效)');
-    process.exit(0);
-  }
-  const r = await sdk.pause();
-  const ok = !!r.ok;
-  log(`[关闭] 已执行暂停时长: ok=${ok} action=${r.action || '-'} httpStatus=${r.httpStatus || '-'}${r.effect ? ' effect=' + r.effect : ''}`);
-  if (ok) {
-    log('[关闭] 时长已暂停。看门狗继续驻留监听: 下次开启加速会自动重新守护 (Ctrl+C 退出)');
-  } else {
-    log('[关闭] 暂停执行失败, 继续驻留, 下次复查会重试 (Ctrl+C 退出)');
-  }
-  // 不管成功失败都不退出: 常驻看门狗, 等待用户下次开启加速
-  if (activityTimer) { clearInterval(activityTimer); activityTimer = null; }  // 策略2 独立模式探测停止
-  if (cfg.strategies.strategy0.enabled) {
-    startPolling();
-  } else {
-    log('[关闭] 主流程(策略0)已关闭, 不恢复轮询(策略1 定时检查仍生效; Ctrl+C 退出)');
+    let r;
+    try {
+      r = await sdk.pause();
+    } catch (e) {
+      // S-1: pause 异常不崩溃, 保持驻留等待重试
+      log(`[关闭] 暂停执行异常: ${e.message} (保持驻留, 下次复查/探测将重试)`);
+      if (activityTimer && !cfg.strategies.strategy0.enabled) {
+        log('[关闭] 策略2 独立模式继续探测, 超过阈值将重试暂停');
+      } else if (cfg.strategies.strategy0.enabled) {
+        startPolling();
+      }
+      return;
+    }
+    const ok = !!r.ok;
+    log(`[关闭] 已执行暂停时长: ok=${ok} action=${r.action || '-'} httpStatus=${r.httpStatus || '-'}${r.effect ? ' effect=' + r.effect : ''}`);
+    if (ok) {
+      log('[关闭] 时长已暂停。看门狗继续驻留监听: 下次开启加速会自动重新守护 (Ctrl+C 退出)');
+      if (activityTimer) { clearInterval(activityTimer); activityTimer = null; }  // 策略2 独立模式: 成功后停止探测
+      if (cfg.strategies.strategy0.enabled) {
+        startPolling();
+      } else {
+        log('[关闭] 主流程(策略0)已关闭, 不恢复轮询(策略1 定时检查仍生效; Ctrl+C 退出)');
+      }
+    } else {
+      // M-1: 失败不谎称重试——独立模式保留探测定时器, 主流程恢复轮询
+      log('[关闭] 暂停执行返回异常, 保持驻留, 下次复查/探测将重试 (Ctrl+C 退出)');
+      if (cfg.strategies.strategy0.enabled) {
+        startPolling();
+      } else if (activityTimer) {
+        log('[关闭] 策略2 独立模式继续探测, 超过阈值将重试暂停');
+      }
+    }
+  } finally {
+    closing = false;
   }
 }
 
@@ -307,18 +336,31 @@ function startActivityGuard() {
   const s2 = cfg.strategies.strategy2;
   log(`[策略2] 独立模式启动: 每 ${cfg.pollIntervalSeconds}s 探测键鼠, 连续空闲超过 ${s2.idleMinutes}min 自动暂停时长`);
   let lastActiveMs = Date.now();
+  let busy = false;  // S-2: 探测最长耗时可能超过间隔, 禁止并发 tick
   activityTimer = setInterval(() => {
+    if (busy) return;
+    busy = true;
     (async () => {
-      const r = await activity.detectActivity(s2.listenSeconds);
-      if (r.active) {
-        lastActiveMs = Date.now();
-        log('[策略2] 检测到键鼠活动, 重置空闲计时');
-        return;
-      }
-      const idleMs = Date.now() - lastActiveMs;
-      log(`[策略2] 空闲中: 已连续 ${(idleMs / 60000).toFixed(1)}min / 阈值 ${s2.idleMinutes}min`);
-      if (idleMs >= s2.idleMinutes * 60 * 1000) {
-        closeGuard(`策略2 独立模式: 连续无键鼠活动 ${s2.idleMinutes} 分钟`);
+      try {
+        const r = await activity.detectActivity(s2.listenSeconds);
+        if (r.samples.some((v) => v === null)) {
+          // M-5: 探测失败视为有活动(fail-closed), 避免误暂停正在使用的用户
+          log('[策略2] 键鼠探测失败, 视为有活动, 重置空闲计时');
+          lastActiveMs = Date.now();
+          return;
+        }
+        if (r.active) {
+          lastActiveMs = Date.now();
+          log('[策略2] 检测到键鼠活动, 重置空闲计时');
+          return;
+        }
+        const idleMs = Date.now() - lastActiveMs;
+        log(`[策略2] 空闲中: 已连续 ${(idleMs / 60000).toFixed(1)}min / 阈值 ${s2.idleMinutes}min`);
+        if (idleMs >= s2.idleMinutes * 60 * 1000) {
+          closeGuard(`策略2 独立模式: 连续无键鼠活动 ${s2.idleMinutes} 分钟`);
+        }
+      } finally {
+        busy = false;
       }
     })();
   }, cfg.pollIntervalSeconds * 1000);
@@ -380,6 +422,11 @@ async function main() {
 process.on('SIGINT', () => {
   log('收到 Ctrl+C, 看门狗退出');
   process.exit(130);
+});
+
+// S-1 兜底: 任何遗漏的 Promise 拒绝都不应击穿常驻进程
+process.on('unhandledRejection', (e) => {
+  log(`[致命] 未处理的 Promise 拒绝: ${e && e.message ? e.message : e} (看门狗保持驻留)`);
 });
 
 main().catch((e) => {
