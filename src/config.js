@@ -2,27 +2,39 @@
 
 /**
  * 配置加载: 默认值 → config.json(项目根目录) → CLI 参数(优先级最高)。
- * 时间全部可配置: 轮询间隔 / 复查间隔(默认 10 分钟)/ 游戏查询等待。
+ *
+ * 结构:
+ * - 全局项(sdkExe/dryRun/debug/logFile)在顶层;
+ * - 策略项都在 strategies 段, 每个策略独立 enabled:
+ *   - strategy0 主流程: 轮询间隔/复查间隔/查询等待/进程上限/二次确认
+ *   - strategy1 定时关闭: closeTimes
+ *   - strategy2 键鼠检测: listenSeconds/deferMinutes
+ * - 兼容: strategy0 未显式配置的参数会回退到顶层旧写法
+ *   (pollIntervalSeconds 等曾在顶层, 新配置请写入 strategies.strategy0)。
  */
 const path = require('path');
 const fs = require('fs');
 
 const ROOT = path.resolve(__dirname, '..');
 
+const GLOBAL_KEYS = ['sdkExe', 'dryRun', 'debug', 'logFile'];
+const PARAM_KEYS = ['pollIntervalSeconds', 'checkIntervalMinutes', 'gameQuerySeconds', 'processMaxResults', 'notFoundConfirmSeconds'];
+
 const DEFAULTS = {
   sdkExe: path.join(ROOT, 'sdk', 'leigod-sdk.exe'),  // 仓库内 exe(随仓库分发)
-  pollIntervalSeconds: 30,   // 轮询加速状态的间隔(秒)
-  checkIntervalMinutes: 10,  // 识别到游戏后, 复查加速状态的间隔(分钟)
-  gameQuerySeconds: 8,       // 每次 game 查询最长等待(秒)
-  processMaxResults: 50,     // 进程搜索最大返回数
-  notFoundConfirmSeconds: 0,  // 未找到游戏进程后二次确认等待(秒); 默认 0 = 不确认直接关闭, 需要时再开启
   dryRun: false,             // true 时「关闭」只预览不真正暂停
   debug: false,              // true 时打印每次 SDK 调用参数与返回的完整 JSON
   logFile: 'watchdog.log',   // 日志文件, 空串则不写文件
-  // 附加策略(全部可配置, enabled 控制开关):
   strategies: {
     // 策略0: 主流程 —— 轮询时长状态 → 询问游戏 → 复查 → 进程检查 → 暂停时长
-    strategy0: { enabled: true },
+    strategy0: {
+      enabled: true,              // 开关
+      pollIntervalSeconds: 30,    // 轮询加速状态的间隔(秒)
+      checkIntervalMinutes: 10,   // 识别到游戏后, 复查加速状态的间隔(分钟)
+      gameQuerySeconds: 8,        // 每次 game 查询最长等待(秒)
+      processMaxResults: 50,      // 进程搜索最大返回数
+      notFoundConfirmSeconds: 0,  // 未找到游戏进程后二次确认等待(秒); 0 = 不确认直接关闭
+    },
     // 策略1: 定时关闭 —— 到达 closeTimes(HH:MM 列表)且时长在计时中 → 暂停时长
     //         (pause 后雷神会自动停止加速游戏, 不使用 stop 接口)
     strategy1: { enabled: false, closeTimes: [] },
@@ -60,21 +72,42 @@ function loadConfig(argv = []) {
   const cfg = { ...DEFAULTS };
   // 策略对象重建副本, 避免共享 DEFAULTS 引用被变异
   cfg.strategies = {
+    strategy0: { ...DEFAULTS.strategies.strategy0 },
     strategy1: { ...DEFAULTS.strategies.strategy1 },
     strategy2: { ...DEFAULTS.strategies.strategy2 },
   };
+
   const file = path.join(ROOT, 'config.json');
   let local = {};
   if (fs.existsSync(file)) {
-    try { local = JSON.parse(fs.readFileSync(file, 'utf8')); }
+    try {
+      // 容错: 兼容带 UTF-8 BOM 的文件(如 PowerShell Set-Content -Encoding UTF8 产物)
+      local = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+    }
     catch (e) {
       console.error(`[配置] config.json 解析失败: ${e.message}`);
       process.exit(1);
     }
-    for (const k of Object.keys(DEFAULTS)) {
+    for (const k of GLOBAL_KEYS) {
       if (local[k] !== undefined && local[k] !== null) cfg[k] = local[k];
     }
     if (local.logFile === '') cfg.logFile = null;
+  }
+
+  // 策略深度合并: 只覆盖显式给出的字段
+  for (const key of Object.keys(DEFAULTS.strategies)) {
+    const src = local.strategies && local.strategies[key];
+    if (src && typeof src === 'object') {
+      for (const f of Object.keys(src)) cfg.strategies[key][f] = src[f];
+    }
+  }
+
+  // 兼容旧顶层写法: strategy0 未显式配置的参数回退到顶层旧字段
+  const s0Given = (local.strategies && typeof local.strategies.strategy0 === 'object') ? local.strategies.strategy0 : {};
+  for (const k of PARAM_KEYS) {
+    if (!(k in s0Given) && local[k] !== undefined && local[k] !== null) {
+      cfg.strategies.strategy0[k] = local[k];
+    }
   }
 
   const flags = parseArgs(argv);
@@ -87,32 +120,25 @@ function loadConfig(argv = []) {
   if (flags.strategy2) cfg.strategies.strategy2.enabled = true;
   if (flags.logFile === false) cfg.logFile = null;
   if (flags.sdkExe) cfg.sdkExe = path.resolve(ROOT, flags.sdkExe);
-  for (const k of ['pollIntervalSeconds', 'checkIntervalMinutes', 'gameQuerySeconds', 'processMaxResults', 'notFoundConfirmSeconds']) {
+  for (const k of PARAM_KEYS) {
     if (flags[k] !== undefined) {
       const n = Number(flags[k]);
       if (!Number.isFinite(n) || n <= 0) {
         console.error(`[配置] 参数 ${k}=${flags[k]} 无效`);
         process.exit(1);
       }
-      cfg[k] = n;
+      cfg.strategies.strategy0[k] = n;
     }
   }
 
-  // strategies 深度合并: 允许只写部分字段(在 DEFAULTS 拷贝之后覆盖)
-  if (local.strategies && typeof local.strategies === 'object') {
-    for (const key of Object.keys(DEFAULTS.strategies)) {
-      const src = local.strategies[key];
-      if (src && typeof src === 'object') {
-        cfg.strategies[key] = { ...DEFAULTS.strategies[key], ...src };
-      }
-    }
+  // 回填顶层(兼容代码直接读 cfg.pollIntervalSeconds) + 兜底下限
+  for (const k of PARAM_KEYS) {
+    cfg[k] = cfg.strategies.strategy0[k];
   }
-
-  // 兜底下限, 防止误配置造成高频/无效调用
-  if (cfg.pollIntervalSeconds < 5) cfg.pollIntervalSeconds = 5;
-  if (cfg.checkIntervalMinutes < 1) cfg.checkIntervalMinutes = 1;
-  if (cfg.gameQuerySeconds < 3) cfg.gameQuerySeconds = 3;
-  if (cfg.notFoundConfirmSeconds < 0) cfg.notFoundConfirmSeconds = 0;
+  if (cfg.pollIntervalSeconds < 5) { cfg.pollIntervalSeconds = 5; cfg.strategies.strategy0.pollIntervalSeconds = 5; }
+  if (cfg.checkIntervalMinutes < 1) { cfg.checkIntervalMinutes = 1; cfg.strategies.strategy0.checkIntervalMinutes = 1; }
+  if (cfg.gameQuerySeconds < 3) { cfg.gameQuerySeconds = 3; cfg.strategies.strategy0.gameQuerySeconds = 3; }
+  if (cfg.notFoundConfirmSeconds < 0) { cfg.notFoundConfirmSeconds = 0; cfg.strategies.strategy0.notFoundConfirmSeconds = 0; }
   if (cfg.strategies.strategy2.listenSeconds < 1) cfg.strategies.strategy2.listenSeconds = 1;
   if (cfg.strategies.strategy2.deferMinutes < 1) cfg.strategies.strategy2.deferMinutes = 1;
   return cfg;

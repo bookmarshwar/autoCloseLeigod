@@ -306,12 +306,11 @@ async function main() {
     process.exit(1);
   }
 
-  log(`[启动] sdkExe=${exe}`);
-  log(`[启动] 轮询间隔=${cfg.pollIntervalSeconds}s | 复查间隔=${cfg.checkIntervalMinutes}min | game查询等待=${cfg.gameQuerySeconds}s | dryRun=${cfg.dryRun} | debug=${cfg.debug} | once=${!!cfg.once}`);
+  log(`[启动] sdkExe=${exe} | dryRun=${cfg.dryRun} | debug=${cfg.debug} | once=${!!cfg.once}`);
   const s0 = cfg.strategies.strategy0;
   const s1 = cfg.strategies.strategy1;
   const s2 = cfg.strategies.strategy2;
-  log(`[启动] 策略0 主流程(轮询→守护→关闭): ${s0.enabled ? '开' : '关'}`);
+  log(`[启动] 策略0 主流程(轮询→守护→关闭): ${s0.enabled ? `开 (轮询${cfg.pollIntervalSeconds}s/复查${cfg.checkIntervalMinutes}min/查询${cfg.gameQuerySeconds}s/进程上限${cfg.processMaxResults}/二次确认${cfg.notFoundConfirmSeconds}s)` : '关'}`);
   log(`[启动] 策略1 定时关闭: ${s1.enabled ? `开 (每天 ${s1.closeTimes.length ? s1.closeTimes.join(',') : '未设置时间'})` : '关'}`);
   log(`[启动] 策略2 键鼠检测延后: ${s2.enabled ? `开 (监听 ${s2.listenSeconds}s, 有活动延后 ${s2.deferMinutes}min)` : '关'}`);
   if (!s0.enabled && s2.enabled) {

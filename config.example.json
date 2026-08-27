@@ -1,15 +1,17 @@
 {
   "sdkExe": "sdk\\leigod-sdk.exe",
-  "pollIntervalSeconds": 30,
-  "checkIntervalMinutes": 10,
-  "gameQuerySeconds": 8,
-  "processMaxResults": 50,
-  "notFoundConfirmSeconds": 0,
   "dryRun": false,
   "debug": false,
   "logFile": "watchdog.log",
   "strategies": {
-    "strategy0": { "enabled": true },
+    "strategy0": {
+      "enabled": true,
+      "pollIntervalSeconds": 30,
+      "checkIntervalMinutes": 10,
+      "gameQuerySeconds": 8,
+      "processMaxResults": 50,
+      "notFoundConfirmSeconds": 0
+    },
     "strategy1": { "enabled": false, "closeTimes": ["23:30"] },
     "strategy2": { "enabled": false, "listenSeconds": 3, "deferMinutes": 10 }
   }

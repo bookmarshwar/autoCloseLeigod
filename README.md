@@ -21,11 +21,30 @@
 
 ### 策略0: 主流程(默认开)
 
-配置:
+配置(参数都在 `strategy0` 内):
 
 ```json
-"strategy0": { "enabled": true }
+"strategy0": {
+  "enabled": true,
+  "pollIntervalSeconds": 30,
+  "checkIntervalMinutes": 10,
+  "gameQuerySeconds": 8,
+  "processMaxResults": 50,
+  "notFoundConfirmSeconds": 0
+}
 ```
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `enabled` | true | 主流程开关 |
+| `pollIntervalSeconds` | 30 | 轮询加速状态的间隔(秒) |
+| `checkIntervalMinutes` | 10 | 识别到游戏后复查加速状态的间隔(分钟) |
+| `gameQuerySeconds` | 8 | 每次 game 查询最长等待(秒) |
+| `processMaxResults` | 50 | 进程搜索最大返回数 |
+| `notFoundConfirmSeconds` | 0 | 未找到进程后的二次确认等待(秒); 0 = 直接关闭 |
+
+> 兼容: 旧配置若把以上参数写在顶层(`pollIntervalSeconds` 等), 仍会被读取
+> (`strategy0` 内未显式配置的字段会回退到顶层旧写法)。
 
 工作流程:
 
@@ -119,24 +138,23 @@ npm test                     # 冒烟测试(只读)
 | 配置项 | 默认值 | 说明 |
 |---|---|---|
 | `sdkExe` | `sdk\leigod-sdk.exe` | SDK exe 路径(相对项目根目录) |
-| `pollIntervalSeconds` | 30 | 轮询加速状态的间隔(秒) |
-| `checkIntervalMinutes` | 10 | 识别到游戏后复查加速状态的间隔(分钟) |
-| `gameQuerySeconds` | 8 | 每次 game 查询最长等待(秒) |
-| `processMaxResults` | 50 | 进程搜索最大返回数 |
-| `notFoundConfirmSeconds` | 0 | 未找到游戏进程后二次确认等待(秒); 默认关闭, 担心 ps 瞬时误判时再开启 |
 | `dryRun` | false | true 时「关闭」只预览、不真正暂停时长 |
 | `debug` | false | true 时打印每次 SDK 调用参数与返回的完整 JSON(排查用) |
 | `logFile` | `watchdog.log` | 日志文件(空串则只输出控制台) |
 | `strategies` | 见上方「策略与工作流程」 | 策略0/1/2, 各自独立开关 |
+
+> 策略参数(`pollIntervalSeconds` / `checkIntervalMinutes` / `gameQuerySeconds` /
+> `processMaxResults` / `notFoundConfirmSeconds`)位于 `strategies.strategy0` 内,
+> 见上方「策略0」小节; 顶层仅保留全局项。
 
 没有 config.json 时使用默认值; 可 `copy config.example.json config.json`。
 
 ## CLI 参数(优先级高于 config.json)
 
 ```
---poll <秒>          轮询间隔           --check-min <分钟>    复查间隔
---game-seconds <秒>  game 查询等待      --sdk <路径>          SDK exe 路径
---max-ps <数量>      进程搜索上限        --dry                dry-run, 不真正暂停
+--poll <秒>          策略0轮询间隔     --check-min <分钟>    策略0复查间隔
+--game-seconds <秒>  策略0查询等待     --sdk <路径>          SDK exe 路径
+--max-ps <数量>      策略0进程上限     --dry                dry-run, 不真正暂停
 --once               只跑一轮判断退出    --no-log             不写日志文件
 --debug              打印所有 SDK 调用与返回 JSON
 --strategy0          临时开启策略0(主流程, 默认开)
