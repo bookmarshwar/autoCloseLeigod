@@ -38,9 +38,12 @@ const DEFAULTS = {
     // 策略1: 定时关闭 —— 到达 closeTimes(HH:MM 列表)且时长在计时中 → 暂停时长
     //         (pause 后雷神会自动停止加速游戏, 不使用 stop 接口)
     strategy1: { enabled: false, closeTimes: [] },
-    // 策略2: 键鼠活动检测 —— 执行「关闭」前用 GetLastInputInfo 监听键鼠
-    //         (窗口 listenSeconds 秒); 检测到活动 → 延后 deferMinutes 分钟再判断
-    strategy2: { enabled: false, listenSeconds: 3, deferMinutes: 10 },
+    // 策略2: 键鼠活动检测 —— 两种模式:
+  //  依附模式(策略0 启用): 执行「关闭」前用 GetLastInputInfo 监听键鼠
+  //    (窗口 listenSeconds 秒); 检测到活动 → 延后 deferMinutes 分钟再判断
+  //  独立模式(策略0 关闭): 自身每轮询间隔探测键鼠, 连续空闲 idleMinutes
+  //    分钟后自动暂停时长
+    strategy2: { enabled: false, listenSeconds: 3, deferMinutes: 10, idleMinutes: 15 },
   },
 };
 
@@ -51,6 +54,7 @@ function parseArgs(argv) {
     '--check-min': 'checkIntervalMinutes',
     '--game-seconds': 'gameQuerySeconds',
     '--max-ps': 'processMaxResults',
+    '--idle-min': 'idleMinutes',
     '--sdk': 'sdkExe',
   };
   for (let i = 0; i < argv.length; i++) {
@@ -130,6 +134,14 @@ function loadConfig(argv = []) {
       cfg.strategies.strategy0[k] = n;
     }
   }
+  if (flags.idleMinutes !== undefined) {
+    const n = Number(flags.idleMinutes);
+    if (!Number.isFinite(n) || n <= 0) {
+      console.error(`[配置] 参数 idleMinutes=${flags.idleMinutes} 无效`);
+      process.exit(1);
+    }
+    cfg.strategies.strategy2.idleMinutes = n;
+  }
 
   // 回填顶层(兼容代码直接读 cfg.pollIntervalSeconds) + 兜底下限
   for (const k of PARAM_KEYS) {
@@ -141,6 +153,7 @@ function loadConfig(argv = []) {
   if (cfg.notFoundConfirmSeconds < 0) { cfg.notFoundConfirmSeconds = 0; cfg.strategies.strategy0.notFoundConfirmSeconds = 0; }
   if (cfg.strategies.strategy2.listenSeconds < 1) cfg.strategies.strategy2.listenSeconds = 1;
   if (cfg.strategies.strategy2.deferMinutes < 1) cfg.strategies.strategy2.deferMinutes = 1;
+  if (cfg.strategies.strategy2.idleMinutes < 0.05) cfg.strategies.strategy2.idleMinutes = 0.05;
   return cfg;
 }
 

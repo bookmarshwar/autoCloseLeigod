@@ -18,8 +18,10 @@
  *   策略0 主流程: 轮询时长→询问游戏→复查→进程检查→暂停时长(默认开)
  *   策略1 定时关闭: 每天到达 closeTimes(HH:MM)且计时中 → 暂停时长
  *         (pause 后雷神自动停止加速, 不使用 stop 接口)
- *   策略2 键鼠检测: 「关闭」前监听键鼠活动(listenSeconds 窗口), 有活动则
- *         延后 deferMinutes 再判断(GetLastInputInfo, 纯查询无钩子)
+ *   策略2 键鼠检测: 依附模式(主流程开): 「关闭」前监听键鼠活动
+ *         (listenSeconds 窗口), 有活动则延后 deferMinutes 再判断;
+ *         独立模式(主流程关): 自身轮询键鼠, 连续空闲 idleMinutes
+ *         分钟自动暂停时长(GetLastInputInfo, 纯查询无钩子)
  */
 'use strict';
 
@@ -40,6 +42,7 @@ let guardTimer = null;  // 复查计时器
 let pollBusy = false;   // 轮询执行中标记(防止 interval 重叠)
 let guardBusy = false;  // 复查执行中标记(防止计时器并发)
 let scheduleTimer = null;              // 策略1: 定时检查定时器
+let activityTimer = null;              // 策略2 独立模式: 键鼠探测定时器
 const lastScheduledFired = new Map();  // 策略1: closeTime -> 当天日期(防同一天重复触发)
 const checkMs = cfg.checkIntervalMinutes * 60 * 1000;
 
@@ -106,10 +109,11 @@ async function closeGuard(reason, opts = {}) {
     log('[关闭] 暂停执行失败, 继续驻留, 下次复查会重试 (Ctrl+C 退出)');
   }
   // 不管成功失败都不退出: 常驻看门狗, 等待用户下次开启加速
+  if (activityTimer) { clearInterval(activityTimer); activityTimer = null; }  // 策略2 独立模式探测停止
   if (cfg.strategies.strategy0.enabled) {
     startPolling();
   } else {
-    log('[关闭] 主流程(策略0)已关闭, 不恢复轮询; 策略1 定时检查仍生效');
+    log('[关闭] 主流程(策略0)已关闭, 不恢复轮询(策略1 定时检查仍生效; Ctrl+C 退出)');
   }
 }
 
@@ -296,6 +300,30 @@ function checkScheduledClose() {
   }).catch((e) => log(`[策略1] time 查询失败: ${e.message}`));
 }
 
+/* ---------------- 策略2: 键鼠活动检测 ---------------- */
+
+/** 策略2 独立模式(主流程关闭时): 周期性探测键鼠, 连续空闲超过 idleMinutes 自动暂停 */
+function startActivityGuard() {
+  const s2 = cfg.strategies.strategy2;
+  log(`[策略2] 独立模式启动: 每 ${cfg.pollIntervalSeconds}s 探测键鼠, 连续空闲超过 ${s2.idleMinutes}min 自动暂停时长`);
+  let lastActiveMs = Date.now();
+  activityTimer = setInterval(() => {
+    (async () => {
+      const r = await activity.detectActivity(s2.listenSeconds);
+      if (r.active) {
+        lastActiveMs = Date.now();
+        log('[策略2] 检测到键鼠活动, 重置空闲计时');
+        return;
+      }
+      const idleMs = Date.now() - lastActiveMs;
+      log(`[策略2] 空闲中: 已连续 ${(idleMs / 60000).toFixed(1)}min / 阈值 ${s2.idleMinutes}min`);
+      if (idleMs >= s2.idleMinutes * 60 * 1000) {
+        closeGuard(`策略2 独立模式: 连续无键鼠活动 ${s2.idleMinutes} 分钟`);
+      }
+    })();
+  }, cfg.pollIntervalSeconds * 1000);
+}
+
 /* ---------------- 启动 ---------------- */
 
 async function main() {
@@ -310,13 +338,14 @@ async function main() {
   const s0 = cfg.strategies.strategy0;
   const s1 = cfg.strategies.strategy1;
   const s2 = cfg.strategies.strategy2;
+  const s2Standalone = s2.enabled && !s0.enabled;  // 策略2 独立模式(主流程关闭时)
   log(`[启动] 策略0 主流程(轮询→守护→关闭): ${s0.enabled ? `开 (轮询${cfg.pollIntervalSeconds}s/复查${cfg.checkIntervalMinutes}min/查询${cfg.gameQuerySeconds}s/进程上限${cfg.processMaxResults}/二次确认${cfg.notFoundConfirmSeconds}s)` : '关'}`);
   log(`[启动] 策略1 定时关闭: ${s1.enabled ? `开 (每天 ${s1.closeTimes.length ? s1.closeTimes.join(',') : '未设置时间'})` : '关'}`);
-  log(`[启动] 策略2 键鼠检测延后: ${s2.enabled ? `开 (监听 ${s2.listenSeconds}s, 有活动延后 ${s2.deferMinutes}min)` : '关'}`);
-  if (!s0.enabled && s2.enabled) {
-    log('[启动] 提示: 策略2 依附于主流程的关闭判断, 主流程关闭时策略2 不生效');
+  log(`[启动] 策略2 键鼠检测: ${s2.enabled ? (s2Standalone ? `开 (独立模式: 空闲${s2.idleMinutes}min 自动暂停)` : `开 (监听 ${s2.listenSeconds}s, 有活动延后 ${s2.deferMinutes}min)`) : '关'}`);
+  if (s2Standalone) {
+    log('[启动] 策略2 以独立模式运行: 主流程未启用, 直接按键鼠空闲探测守护时长');
   }
-  if (!s0.enabled && !s1.enabled) {
+  if (!s0.enabled && !s1.enabled && !s2Standalone) {
     log('[启动] 没有任何策略启用, 看门狗退出 (可改 config.json 的 strategies 段)');
     process.exit(0);
   }
@@ -334,6 +363,8 @@ async function main() {
   if (s0.enabled) {
     log('[启动] 开始轮询加速状态 (Ctrl+C 退出)');
     startPolling();
+  } else if (s2Standalone) {
+    startActivityGuard();
   } else {
     log('[启动] 主流程已关闭, 仅运行策略1 定时检查');
   }
