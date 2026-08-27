@@ -52,8 +52,6 @@ const DEFAULTS = {
   },
 };
 
-const LEGACY_S2_KEYS = ['listenSeconds', 'deferMinutes', 'idleMinutes', 'probeIntervalSeconds'];
-
 function parseArgs(argv) {
   const flags = {};
   const takesValue = {
@@ -132,22 +130,11 @@ function loadConfig(argv = []) {
     if (src && typeof src === 'object') deepAssign(cfg.strategies[key], src);
   }
 
-  // 策略2 旧版扁平写法兼容: strategy2 直接挂 listenSeconds/deferMinutes/
-  // idleMinutes/probeIntervalSeconds → 自动映射到 attached/standalone 子对象
-  const s2Given = (local.strategies && typeof local.strategies.strategy2 === 'object') ? local.strategies.strategy2 : {};
-  if (LEGACY_S2_KEYS.some((k) => s2Given[k] !== undefined)) {
-    console.warn('[配置] strategy2 检测到旧版扁平参数, 已自动映射到 attached/standalone 子对象 (推荐迁移: 见 README「策略2」)');
-    const at = cfg.strategies.strategy2.attached;
-    const st = cfg.strategies.strategy2.standalone;
-    const atGiven = (s2Given.attached && typeof s2Given.attached === 'object') ? s2Given.attached : {};
-    const stGiven = (s2Given.standalone && typeof s2Given.standalone === 'object') ? s2Given.standalone : {};
-    if (atGiven.listenSeconds === undefined && s2Given.listenSeconds !== undefined) at.listenSeconds = s2Given.listenSeconds;
-    if (atGiven.deferMinutes === undefined && s2Given.deferMinutes !== undefined) at.deferMinutes = s2Given.deferMinutes;
-    if (stGiven.listenSeconds === undefined && s2Given.listenSeconds !== undefined) st.listenSeconds = s2Given.listenSeconds;
-    if (stGiven.idleMinutes === undefined && s2Given.idleMinutes !== undefined) st.idleMinutes = s2Given.idleMinutes;
-    if (stGiven.probeIntervalSeconds === undefined && s2Given.probeIntervalSeconds !== undefined) st.probeIntervalSeconds = s2Given.probeIntervalSeconds;
+  // 策略2 不再兼容旧版扁平参数(listenSeconds 等直接挂 strategy2 下):
+  // 旧字段即使出现也会被忽略, 参数只在 attached/standalone 子对象内生效
+  for (const k of ['listenSeconds', 'deferMinutes', 'idleMinutes', 'probeIntervalSeconds']) {
+    delete cfg.strategies.strategy2[k];
   }
-  for (const k of LEGACY_S2_KEYS) delete cfg.strategies.strategy2[k];  // 清理顶层残留
 
   // 兼容旧顶层写法: strategy0 未显式配置的参数回退到顶层旧字段
   const s0Given = (local.strategies && typeof local.strategies.strategy0 === 'object') ? local.strategies.strategy0 : {};

@@ -145,8 +145,7 @@
 | `standalone.probeIntervalSeconds` | 30 | 独立 | 键鼠探测间隔(秒), 与策略0 轮询间隔无关 |
 
 > 各模式参数已按 `attached` / `standalone` 分组, **只在自己模式生效, 互不干扰**;
-> 旧版扁平写法(`listenSeconds`/`deferMinutes`/`idleMinutes`/`probeIntervalSeconds`
-> 直接挂 `strategy2` 下)仍兼容, 会自动映射到两个子对象并在启动时提示一次。
+> 参数只接受子对象写法, 旧版扁平写法(参数直接挂 `strategy2` 下)不再兼容, 会直接忽略。
 
 - 实现: Win32 `GetLastInputInfo`, **纯查询、无钩子/驱动**, 与雷神无关。
 - 两种模式自动切换: 主流程(策略0)开→依附模式; 主流程关→独立模式(此时
