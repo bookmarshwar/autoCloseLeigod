@@ -2,3 +2,5 @@ node_modules/
 config.json
 watchdog.log
 *.log
+.state.json
+.register.json

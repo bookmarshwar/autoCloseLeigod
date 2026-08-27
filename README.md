@@ -1,12 +1,18 @@
 # autoCloseLeigod — 雷神加速器「没人玩游戏就自动暂停时长」看门狗
 
-调用 [leigod-sdk](https://github.com/bookmarshwar/leigod-sdk)(已编译 `build/leigod-sdk.exe`)完成全部底层能力, 本仓库只实现**决策逻辑**, 零第三方依赖:
+调用 leigod-sdk 的编译产物 `sdk/leigod-sdk.exe`(已随本仓库分发)完成全部底层能力, 本仓库只实现**决策逻辑**, 零第三方依赖:
 
 - 定时轮询加速状态;
 - 加速时自动查询当前加速的游戏(**询问是否有加速游戏**);
 - 识别到游戏后**停止轮询**, 启动**复查计时器(默认 10 分钟, 可配置)**;
 - 计时到期再次查询: **没有游戏在加速 → 自动暂停时长**;
 - 有游戏在加速 → **搜索游戏进程**: **进程不存在 → 暂停时长**; 进程存在 → 重新计时, 循环监控。
+
+## 目录结构
+
+- `src/` — 看门狗决策逻辑(零第三方依赖)
+- `sdk/leigod-sdk.exe` — leigod-sdk 编译产物(单文件 exe, 免装 Node, 随仓库分发;
+  首次运行自动生成同目录 `sdk/config.json` 绑定信息, 不入库)
 
 ## 工作流程
 
@@ -36,8 +42,8 @@
 
 ## 使用
 
-前提: `leigod-sdk/build/leigod-sdk.exe` 已存在且已绑定(首次执行一次
-`leigod-sdk.exe bind --auto` 即可)。
+前提: `sdk/leigod-sdk.exe` 已随仓库提供, 首次使用会自动绑定雷神加速器位置
+(也可手动: `sdk\leigod-sdk.exe bind --auto`)。
 
 ```bash
 npm start                    # 常驻看门狗
@@ -49,7 +55,7 @@ npm test                     # 冒烟测试(只读)
 
 | 配置项 | 默认值 | 说明 |
 |---|---|---|
-| `sdkExe` | `..\leigod-sdk\build\leigod-sdk.exe` | SDK exe 路径(相对 config.json) |
+| `sdkExe` | `sdk\leigod-sdk.exe` | SDK exe 路径(相对项目根目录) |
 | `pollIntervalSeconds` | 30 | 轮询加速状态的间隔(秒) |
 | `checkIntervalMinutes` | 10 | 识别到游戏后复查加速状态的间隔(分钟) |
 | `gameQuerySeconds` | 8 | 每次 game 查询最长等待(秒) |

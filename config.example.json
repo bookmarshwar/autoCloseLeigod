@@ -1,5 +1,5 @@
 {
-  "sdkExe": "..\\leigod-sdk\\build\\leigod-sdk.exe",
+  "sdkExe": "sdk\\leigod-sdk.exe",
   "pollIntervalSeconds": 30,
   "checkIntervalMinutes": 10,
   "gameQuerySeconds": 8,

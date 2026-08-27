@@ -10,7 +10,7 @@ const fs = require('fs');
 const ROOT = path.resolve(__dirname, '..');
 
 const DEFAULTS = {
-  sdkExe: path.join(ROOT, '..', 'leigod-sdk', 'build', 'leigod-sdk.exe'),
+  sdkExe: path.join(ROOT, 'sdk', 'leigod-sdk.exe'),  // 仓库内 exe(随仓库分发)
   pollIntervalSeconds: 30,   // 轮询加速状态的间隔(秒)
   checkIntervalMinutes: 10,  // 识别到游戏后, 复查加速状态的间隔(分钟)
   gameQuerySeconds: 8,       // 每次 game 查询最长等待(秒)
