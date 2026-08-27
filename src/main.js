@@ -363,9 +363,13 @@ function startActivityGuard() {
   const s2 = cfg.strategies.strategy2.standalone;
   log(`[策略2] 独立模式启动: 每 ${s2.probeIntervalSeconds}s 探测键鼠, 连续空闲超过 ${s2.idleMinutes}min 自动暂停时长`);
   let lastActiveMs = Date.now();
+  let lastReportedMin = 0;  // 空闲整分钟心跳(非 debug 也可见, 证明探测存活)
   let busy = false;  // S-2: 探测最长耗时可能超过间隔, 禁止并发 tick
   activityTimer = setInterval(() => {
-    if (busy) return;
+    if (busy) {
+      logDebug(`[策略2] 上一轮探测尚未完成, 跳过本次 (探测耗时可能大于 ${s2.probeIntervalSeconds}s 间隔)`);
+      return;
+    }
     busy = true;
     (async () => {
       try {
@@ -374,14 +378,21 @@ function startActivityGuard() {
           // M-5: 探测失败视为有活动(fail-closed), 避免误暂停正在使用的用户
           logWarn('[策略2] 键鼠探测失败, 视为有活动, 重置空闲计时');
           lastActiveMs = Date.now();
+          lastReportedMin = 0;
           return;
         }
         if (r.active) {
           lastActiveMs = Date.now();
+          lastReportedMin = 0;
           logDebug('[策略2] 检测到键鼠活动, 重置空闲计时');
           return;
         }
         const idleMs = Date.now() - lastActiveMs;
+        const minFloor = Math.floor(idleMs / 60000);
+        if (minFloor >= 1 && minFloor !== lastReportedMin) {
+          lastReportedMin = minFloor;
+          log(`[策略2] 空闲累计 ${minFloor}min / 阈值 ${s2.idleMinutes}min (持续无键鼠操作, 探测运行中)`);
+        }
         logDebug(`[策略2] 空闲中: 已连续 ${(idleMs / 60000).toFixed(1)}min / 阈值 ${s2.idleMinutes}min`);
         if (idleMs >= s2.idleMinutes * 60 * 1000) {
           closeGuard(`策略2 独立模式: 连续无键鼠活动 ${s2.idleMinutes} 分钟`);
