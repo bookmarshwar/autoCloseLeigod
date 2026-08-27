@@ -42,15 +42,15 @@
 
 ## 策略(config.json 的 `strategies` 段, 全部可配置, 可单独开关)
 
-### 策略1: 定时关闭(定时暂停时长, 可选一并停止加速)
+### 策略1: 定时关闭(定时暂停时长)
 
 ```json
-"strategy1": { "enabled": true, "closeTimes": ["23:30", "01:00"], "stopAcceleration": true }
+"strategy1": { "enabled": true, "closeTimes": ["23:30", "01:00"] }
 ```
 
-- 每天到达 `closeTimes`(HH:MM 列表)且**时长仍在计时** → 自动暂停时长;
-  `stopAcceleration: true` 且正在加速时, 一并调用 `stop --force` 停止加速。
-- 适合睡前/固定时间兜底, 防止挂机烧时长。
+- 每天到达 `closeTimes`(HH:MM 列表)且**时长仍在计时** → 自动暂停时长。
+- 暂停时长后雷神**会自动停止加速游戏**, 无需额外 stop 动作, 适合睡前/固定时间
+  兜底, 防止挂机烧时长。
 - 用 `--strategy1` 参数可临时开启(时间仍需在配置里给出)。
 
 ### 策略2: 键鼠活动检测(关闭前延后判断)

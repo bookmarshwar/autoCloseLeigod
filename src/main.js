@@ -15,7 +15,8 @@
  *          进程存在   → 重新计时, 循环监控
  *
  * 附加策略(config.json strategies, 可单独开关):
- *   策略1 定时关闭: 每天到达 closeTimes(HH:MM)且计时中 → 暂停时长(可一并停止加速)
+ *   策略1 定时关闭: 每天到达 closeTimes(HH:MM)且计时中 → 暂停时长
+ *         (pause 后雷神自动停止加速, 不使用 stop 接口)
  *   策略2 键鼠检测: 「关闭」前监听键鼠活动(listenSeconds 窗口), 有活动则
  *         延后 deferMinutes 再判断(GetLastInputInfo, 纯查询无钩子)
  */
@@ -284,16 +285,8 @@ function checkScheduledClose() {
       return;
     }
     log(`[策略1] 时长仍在计时, 执行定时关闭`);
-    if (s1.stopAcceleration) {
-      sdk.stop().then((r) => {
-        log(`[策略1] 已请求停止加速: ${JSON.stringify(r)}`);
-        return closeGuard(`定时关闭 ${hhmm}`);
-      }).catch((e) => {
-        log(`[策略1] 停止加速失败: ${e.message} (仍暂停时长)`);
-        return closeGuard(`定时关闭 ${hhmm}`);
-      });
-      return;
-    }
+    // 不调用 stop: pause 暂停时长后雷神会自动停止加速游戏, stop 只会清除
+    // game 检测到的状态, 没有额外意义
     closeGuard(`定时关闭 ${hhmm}`);
   }).catch((e) => log(`[策略1] time 查询失败: ${e.message}`));
 }

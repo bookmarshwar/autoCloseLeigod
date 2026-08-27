@@ -91,9 +91,6 @@ class Leigod {
 
   /** 暂停时长(云端回放, 等效界面「暂停时长」按钮): { ok, action, httpStatus, ... } */
   pause() { return this.run(['pause', '--force'], 45000); }
-
-  /** 停止加速游戏(本地 WS, 等效点按钮; 自动识别当前会话 game_id): { confirmed, ... } */
-  stop() { return this.run(['stop', '--force'], 45000); }
 }
 
 module.exports = Leigod;

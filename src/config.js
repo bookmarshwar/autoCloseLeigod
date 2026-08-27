@@ -21,9 +21,9 @@ const DEFAULTS = {
   logFile: 'watchdog.log',   // 日志文件, 空串则不写文件
   // 附加策略(全部可配置, enabled 控制开关):
   strategies: {
-    // 策略1: 定时关闭 —— 到达 closeTimes(HH:MM 列表)且时长在计时中 → 暂停时长;
-    //         stopAcceleration=true 且正在加速时一并停止加速
-    strategy1: { enabled: false, closeTimes: [], stopAcceleration: true },
+    // 策略1: 定时关闭 —— 到达 closeTimes(HH:MM 列表)且时长在计时中 → 暂停时长
+    //         (pause 后雷神会自动停止加速游戏, 不使用 stop 接口)
+    strategy1: { enabled: false, closeTimes: [] },
     // 策略2: 键鼠活动检测 —— 执行「关闭」前用 GetLastInputInfo 监听键鼠
     //         (窗口 listenSeconds 秒); 检测到活动 → 延后 deferMinutes 分钟再判断
     strategy2: { enabled: false, listenSeconds: 3, deferMinutes: 10 },
