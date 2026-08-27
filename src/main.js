@@ -27,6 +27,8 @@ let cycle = 0;          // 轮询计数
 let guardNo = 0;        // 复查计数
 let pollTimer = null;   // 轮询定时器
 let guardTimer = null;  // 复查计时器
+let pollBusy = false;   // 轮询执行中标记(防止 interval 重叠)
+let guardBusy = false;  // 复查执行中标记(防止计时器并发)
 const checkMs = cfg.checkIntervalMinutes * 60 * 1000;
 
 /* ---------------- 日志 ---------------- */
@@ -77,41 +79,48 @@ async function closeGuard(reason) {
 
 /** 轮询一次: 查询加速状态; 加速中则询问是否有加速游戏 */
 async function pollOnce() {
-  cycle++;
-  let t;
+  if (pollBusy) return;   // 上一轮还没结束(例如 game 查询超时), 跳过本次
+  pollBusy = true;
   try {
-    t = await sdk.time();
-  } catch (e) {
-    log(`[轮询#${cycle}] time 查询失败: ${e.message} (继续轮询)`);
-    return;
-  }
-  const acc = t.acc || {};
-  if (!acc.accelerating) {
-    log(`[轮询#${cycle}] 当前未在加速 (state=${t.state}), 继续轮询`);
-    return;
-  }
+    cycle++;
+    let t;
+    try {
+      t = await sdk.time();
+    } catch (e) {
+      log(`[轮询#${cycle}] time 查询失败: ${e.message} (继续轮询)`);
+      return;
+    }
+    const acc = t.acc || {};
+    if (!acc.accelerating) {
+      log(`[轮询#${cycle}] 当前未在加速 (state=${t.state}), 继续轮询`);
+      return;
+    }
 
-  // 加速中 → 询问是否有加速游戏
-  let g;
-  try {
-    g = await sdk.game(cfg.gameQuerySeconds);
-  } catch (e) {
-    log(`[轮询#${cycle}] game 查询失败: ${e.message} (继续轮询)`);
-    return;
-  }
+    // 加速中 → 询问是否有加速游戏
+    let g;
+    try {
+      g = await sdk.game(cfg.gameQuerySeconds);
+    } catch (e) {
+      log(`[轮询#${cycle}] game 查询失败: ${e.message} (继续轮询)`);
+      return;
+    }
 
-  if (g.accelerating && g.gameId) {
-    const name = g.gameName || ('game_id=' + g.gameId);
-    log(`[轮询#${cycle}] 加速中, 识别到游戏: ${name}${g.exeName ? ' / exe=' + g.exeName : ''}`);
-    await enterGuard();
-  } else {
-    log(`[轮询#${cycle}] 加速中但未识别到游戏 (accelerating=${g.accelerating}, gameId=${g.gameId || '-'}), 继续轮询等待游戏出现`);
+    if (g.accelerating && g.gameId) {
+      const name = g.gameName || ('game_id=' + g.gameId);
+      log(`[轮询#${cycle}] 加速中, 识别到游戏: ${name}${g.exeName ? ' / exe=' + g.exeName : ''}`);
+      await enterGuard();
+    } else {
+      log(`[轮询#${cycle}] 加速中但未识别到游戏 (accelerating=${g.accelerating}, gameId=${g.gameId || '-'}), 继续轮询等待游戏出现`);
+    }
+  } finally {
+    pollBusy = false;
   }
 }
 
 /** 进入计时阶段: 关闭轮询, 启动复查计时器 */
 async function enterGuard() {
   stopPolling();
+  if (guardTimer) { clearTimeout(guardTimer); guardTimer = null; }  // 防计时器叠加
   log(`[计时] 已停止轮询, ${cfg.checkIntervalMinutes} 分钟后复查加速状态`);
   if (cfg.once) return runGuardCheck();
   guardTimer = setTimeout(runGuardCheck, checkMs);
@@ -119,48 +128,54 @@ async function enterGuard() {
 
 /** 计时到期: 再次询问加速状态; 无游戏 → 关闭; 有游戏 → 搜索进程 */
 async function runGuardCheck() {
-  guardTimer = null;
-  guardNo++;
-  let g;
+  if (guardBusy) return;   // 防止多个计时器同时触发
+  guardBusy = true;
   try {
-    g = await sdk.game(cfg.gameQuerySeconds);
-  } catch (e) {
-    log(`[检查#${guardNo}] game 查询失败: ${e.message}, ${cfg.checkIntervalMinutes} 分钟后重试`);
+    guardTimer = null;
+    guardNo++;
+    let g;
+    try {
+      g = await sdk.game(cfg.gameQuerySeconds);
+    } catch (e) {
+      log(`[检查#${guardNo}] game 查询失败: ${e.message}, ${cfg.checkIntervalMinutes} 分钟后重试`);
+      if (!cfg.once) guardTimer = setTimeout(runGuardCheck, checkMs);
+      return;
+    }
+
+    if (!(g.accelerating && g.gameId)) {
+      // 没有游戏在加速 → 关闭
+      log(`[检查#${guardNo}] 加速状态: 没有游戏在加速 (accelerating=${g.accelerating}, gameId=${g.gameId || '-'})`);
+      await closeGuard('复查时没有游戏在加速');
+      return;
+    }
+
+    // 有游戏在加速 → 搜索进程
+    const keyword = g.exeName || g.gameName || String(g.gameId);
+    log(`[检查#${guardNo}] 加速中: ${g.gameName || ('game_id=' + g.gameId)} → 搜索进程关键字: ${keyword}`);
+    let p;
+    try {
+      p = await sdk.ps(keyword, cfg.processMaxResults);
+    } catch (e) {
+      log(`[检查#${guardNo}] 进程搜索失败: ${e.message}, ${cfg.checkIntervalMinutes} 分钟后重试`);
+      if (!cfg.once) guardTimer = setTimeout(runGuardCheck, checkMs);
+      return;
+    }
+
+    if (p.count === 0) {
+      log(`[检查#${guardNo}] 未找到进程「${keyword}」, 游戏不在运行`);
+      await closeGuard(`搜索进程「${keyword}」无结果`);
+      return;
+    }
+
+    const names = p.processes
+      .map((pr) => pr.name + (pr.windowTitle ? `("${pr.windowTitle}")` : ''))
+      .join(', ');
+    log(`[检查#${guardNo}] 进程「${keyword}」存在: ${names}`);
+    log(`[计时] 游戏仍在运行, ${cfg.checkIntervalMinutes} 分钟后再次复查`);
     if (!cfg.once) guardTimer = setTimeout(runGuardCheck, checkMs);
-    return;
+  } finally {
+    guardBusy = false;
   }
-
-  if (!(g.accelerating && g.gameId)) {
-    // 没有游戏在加速 → 关闭
-    log(`[检查#${guardNo}] 加速状态: 没有游戏在加速 (accelerating=${g.accelerating}, gameId=${g.gameId || '-'})`);
-    await closeGuard('复查时没有游戏在加速');
-    return;
-  }
-
-  // 有游戏在加速 → 搜索进程
-  const keyword = g.exeName || g.gameName || String(g.gameId);
-  log(`[检查#${guardNo}] 加速中: ${g.gameName || ('game_id=' + g.gameId)} → 搜索进程关键字: ${keyword}`);
-  let p;
-  try {
-    p = await sdk.ps(keyword, cfg.processMaxResults);
-  } catch (e) {
-    log(`[检查#${guardNo}] 进程搜索失败: ${e.message}, ${cfg.checkIntervalMinutes} 分钟后重试`);
-    if (!cfg.once) guardTimer = setTimeout(runGuardCheck, checkMs);
-    return;
-  }
-
-  if (p.count === 0) {
-    log(`[检查#${guardNo}] 未找到进程「${keyword}」, 游戏不在运行`);
-    await closeGuard(`搜索进程「${keyword}」无结果`);
-    return;
-  }
-
-  const names = p.processes
-    .map((pr) => pr.name + (pr.windowTitle ? `("${pr.windowTitle}")` : ''))
-    .join(', ');
-  log(`[检查#${guardNo}] 进程「${keyword}」存在: ${names}`);
-  log(`[计时] 游戏仍在运行, ${cfg.checkIntervalMinutes} 分钟后再次复查`);
-  if (!cfg.once) guardTimer = setTimeout(runGuardCheck, checkMs);
 }
 
 function stopPolling() {
@@ -199,8 +214,10 @@ async function main() {
   }
 
   log('[启动] 开始轮询加速状态 (Ctrl+C 退出)');
-  await pollOnce();
+  // 注意: 必须先注册 interval 再跑第一轮, 否则第一轮进入计时阶段时
+  //       pollTimer 还是 null, stopPolling() 清不掉轮询 → 轮询无法停止
   pollTimer = setInterval(() => pollOnce(), cfg.pollIntervalSeconds * 1000);
+  await pollOnce();
 }
 
 process.on('SIGINT', () => {
